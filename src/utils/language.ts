@@ -8,6 +8,7 @@ import { showToast } from './ui';
 // Language: Language Code in books/translations
 export const languageCodeMap: Record<string, string> = {
   English: 'en',
+  Chinese: 'zh',
   French: 'fr',
   German: 'de',
   Portuguese: 'pt',
