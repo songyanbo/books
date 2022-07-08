@@ -1,10 +1,18 @@
 <template>
   <a
-    class="cursor-pointer font-semibold flex items-center"
+    class="
+      cursor-pointer
+      font-semibold
+      flex
+      items-center
+      bg-gray-200
+      text-gray-700
+      px-3
+      rounded-md
+    "
     @click="$router.back()"
   >
-    <feather-icon name="chevron-left" class="w-5 h-5" />
-    <span class="ml-1">{{ t`Back` }}</span>
+    <feather-icon name="chevron-left" class="w-4 h-4" />
   </a>
 </template>
 <script></script>
