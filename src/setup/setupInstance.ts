@@ -1,5 +1,5 @@
 import { Fyo } from 'fyo';
-import { ConfigFile, DocValueMap } from 'fyo/core/types';
+import { DocValueMap } from 'fyo/core/types';
 import { Doc } from 'fyo/model/doc';
 import { createNumberSeries } from 'fyo/model/naming';
 import {
@@ -27,6 +27,7 @@ export default async function setupInstance(
   const { companyName, country, bankName, chartOfAccounts } =
     setupWizardOptions;
 
+  fyo.store.skipTelemetryLogging = true;
   await initializeDatabase(dbPath, country, fyo);
   await updateSystemSettings(setupWizardOptions, fyo);
   await updateAccountingSettings(setupWizardOptions, fyo);
@@ -39,6 +40,7 @@ export default async function setupInstance(
   await createDefaultNumberSeries(fyo);
 
   await completeSetup(companyName, fyo);
+  fyo.store.skipTelemetryLogging = false;
 }
 
 async function createDefaultEntries(fyo: Fyo) {
@@ -222,26 +224,7 @@ async function setDefaultAccounts(fyo: Fyo) {
 }
 
 async function completeSetup(companyName: string, fyo: Fyo) {
-  await updateInitializationConfig(companyName, fyo);
   await fyo.singles.AccountingSettings!.setAndSync('setupComplete', true);
-}
-
-async function updateInitializationConfig(companyName: string, fyo: Fyo) {
-  const instanceId = (await fyo.getValue(
-    ModelNameEnum.SystemSettings,
-    'instanceId'
-  )) as string;
-  const dbPath = fyo.db.dbPath;
-  const files = fyo.config.get('files', []) as ConfigFile[];
-
-  files.forEach((file) => {
-    if (file.dbPath === dbPath) {
-      file.companyName = companyName;
-      file.id = instanceId;
-    }
-  });
-
-  fyo.config.set('files', files);
 }
 
 async function checkAndCreateDoc(
