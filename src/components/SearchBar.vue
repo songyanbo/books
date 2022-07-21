@@ -32,7 +32,7 @@
           text-2xl
           focus:outline-none
           w-full
-          placeholder-gray-700
+          placeholder-gray-500
           text-gray-900
           rounded-md
           p-3
@@ -144,7 +144,7 @@
       </div>
 
       <!-- Keybindings Help -->
-      <div class="flex text-sm text-gray-500 justify-between">
+      <div class="flex text-sm text-gray-500 justify-between items-baseline">
         <div class="flex gap-4">
           <p>↑↓ {{ t`Navigate` }}</p>
           <p>↩ {{ t`Select` }}</p>
@@ -160,7 +160,7 @@
         </p>
 
         <div
-          class="border border-gray-100 rounded flex justify-self-end"
+          class="border border-gray-100 rounded flex justify-self-end ml-2"
           v-if="(searcher?.numSearches ?? 0) > 50"
         >
           <template

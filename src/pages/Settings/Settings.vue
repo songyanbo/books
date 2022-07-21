@@ -1,5 +1,5 @@
 <template>
-  <FormContainer :title="t`Settings`">
+  <FormContainer :title="t`Settings`" :searchborder="false">
     <template #body>
       <!-- Icon Tab Bar -->
       <div class="flex justify-around mb-2 mt-4">
@@ -95,7 +95,8 @@ export default {
     if (
       fieldnames.includes('displayPrecision') ||
       fieldnames.includes('hideGetStarted') ||
-      fieldnames.includes('displayPrecision')
+      fieldnames.includes('displayPrecision') ||
+      fieldnames.includes('enableDiscounting')
     ) {
       this.showReloadToast();
     }

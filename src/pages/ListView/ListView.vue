@@ -4,7 +4,7 @@
       <FilterDropdown
         ref="filterDropdown"
         @change="applyFilter"
-        :fields="fields"
+        :schema-name="schemaName"
       />
       <Button
         :icon="true"
@@ -13,7 +13,7 @@
         :padding="false"
         class="px-3"
       >
-        <feather-icon name="plus" class="w-4 h-4 text-white" />
+        <feather-icon name="plus" class="w-4 h-4" />
       </Button>
     </PageHeader>
     <List
@@ -53,7 +53,7 @@ export default {
   },
   async activated() {
     if (typeof this.filters === 'object') {
-      this.$refs.filterDropdown.setFilter(this.filters);
+      this.$refs.filterDropdown.setFilter(this.filters, true);
     }
 
     this.listConfig = getListConfig(this.schemaName);

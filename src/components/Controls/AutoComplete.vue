@@ -12,14 +12,8 @@
         {{ df.label }}
       </div>
       <div
-        class="
-          flex
-          items-center
-          justify-between
-          focus-within:bg-gray-200
-          pr-2
-          rounded
-        "
+        class="flex items-center justify-between pr-2 rounded"
+        :class="isReadOnly ? '' : 'focus-within:bg-gray-200'"
       >
         <input
           ref="input"
@@ -29,8 +23,8 @@
           :value="linkValue"
           :placeholder="inputPlaceholder"
           :readonly="isReadOnly"
-          @focus="(e) => onFocus(e, toggleDropdown)"
-          @blur="(e) => onBlur(e.target.value)"
+          @focus="(e) => !isReadOnly && onFocus(e, toggleDropdown)"
+          @blur="(e) => !isReadOnly && onBlur(e.target.value)"
           @input="onInput"
           @keydown.up="highlightItemUp"
           @keydown.down="highlightItemDown"
@@ -189,6 +183,10 @@ export default {
       }
     },
     onInput(e) {
+      if (this.isReadOnly) {
+        return;
+      }
+
       this.toggleDropdown(true);
       this.updateSuggestions(e.target.value);
     },

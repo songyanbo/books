@@ -6,23 +6,24 @@
       px-2
       border-b
       hover:bg-gray-50
-      h-row-mid
       group
       flex
       items-center
       justify-center
+      h-row-mid
     "
   >
     <!-- Index or Remove button -->
     <div class="flex items-center pl-2 text-gray-600">
-      <span class="hidden group-hover:inline-block">
+      <span class="hidden" :class="{ 'group-hover:inline-block': !readOnly }">
         <feather-icon
           name="x"
           class="w-4 h-4 -ml-1 cursor-pointer"
+          :button="true"
           @click="$emit('remove')"
         />
       </span>
-      <span class="group-hover:hidden">
+      <span :class="{ 'group-hover:hidden': !readOnly }">
         {{ row.idx + 1 }}
       </span>
     </div>
@@ -39,11 +40,21 @@
       @change="(value) => onChange(df, value)"
       @new-doc="(doc) => row.set(df.fieldname, doc.name)"
     />
+    <Button
+      :icon="true"
+      :padding="false"
+      :background="false"
+      @click="openRowQuickEdit"
+      v-if="canEditRow"
+    >
+      <feather-icon name="edit" class="w-4 h-4 text-gray-600" />
+    </Button>
 
     <!-- Error Display -->
     <div
-      class="text-sm text-red-600 mb-2 pl-2 col-span-full"
-      v-if="Object.values(errors).filter(Boolean).length"
+      class="text-xs text-red-600 pl-2 col-span-full relative"
+      style="bottom: 0.75rem; height: 0px"
+      v-if="hasErrors"
     >
       {{ getErrorString() }}
     </div>
@@ -53,6 +64,7 @@
 import { Doc } from 'fyo/model/doc';
 import Row from 'src/components/Row.vue';
 import { getErrorMessage } from 'src/utils';
+import Button from '../Button.vue';
 import FormControl from './FormControl.vue';
 
 export default {
@@ -64,11 +76,16 @@ export default {
     ratio: Array,
     isNumeric: Function,
     readOnly: Boolean,
+    canEditRow: {
+      type: Boolean,
+      default: false,
+    },
   },
   emits: ['remove'],
   components: {
     Row,
     FormControl,
+    Button,
   },
   data: () => ({ hovering: false, errors: {} }),
   beforeCreate() {
@@ -80,6 +97,11 @@ export default {
       name: this.row.name,
       doc: this.row,
     };
+  },
+  computed: {
+    hasErrors() {
+      return Object.values(this.errors).filter(Boolean).length;
+    },
   },
   methods: {
     onChange(df, value) {
@@ -94,6 +116,13 @@ export default {
     },
     getErrorString() {
       return Object.values(this.errors).filter(Boolean).join(' ');
+    },
+    openRowQuickEdit() {
+      if (!this.row) {
+        return;
+      }
+
+      this.$parent.$emit('editrow', this.row);
     },
   },
 };

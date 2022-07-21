@@ -1,6 +1,7 @@
 import Account from './app/Account.json';
 import AccountingLedgerEntry from './app/AccountingLedgerEntry.json';
 import AccountingSettings from './app/AccountingSettings.json';
+import Misc from './app/Misc.json';
 import Address from './app/Address.json';
 import Color from './app/Color.json';
 import CompanySettings from './app/CompanySettings.json';
@@ -22,6 +23,7 @@ import SetupWizard from './app/SetupWizard.json';
 import Tax from './app/Tax.json';
 import TaxDetail from './app/TaxDetail.json';
 import TaxSummary from './app/TaxSummary.json';
+import UOM from './app/UOM.json';
 import PatchRun from './core/PatchRun.json';
 import SingleValue from './core/SingleValue.json';
 import SystemSettings from './core/SystemSettings.json';
@@ -45,6 +47,7 @@ export const metaSchemas: SchemaStub[] = [
 ];
 
 export const appSchemas: Schema[] | SchemaStub[] = [
+  Misc as Schema,
   SetupWizard as Schema,
   GetStarted as Schema,
 
@@ -62,6 +65,7 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   Party as Schema,
   Address as Schema,
   Item as Schema,
+  UOM as Schema,
 
   Payment as Schema,
   PaymentFor as Schema,

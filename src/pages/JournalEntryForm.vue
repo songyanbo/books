@@ -1,5 +1,5 @@
 <template>
-  <FormContainer :backLink="true">
+  <FormContainer>
     <!-- Page Header (Title, Buttons, etc) -->
     <template #header v-if="doc">
       <StatusBadge :status="status" />
@@ -53,7 +53,6 @@
             class="bg-gray-100 rounded"
             input-class="p-2 text-base bg-transparent"
             :read-only="!doc.notInserted || doc.submitted"
-            :class="doc.submitted && 'pointer-events-none'"
           />
           <FormControl
             :df="getField('date')"
@@ -62,7 +61,6 @@
             @change="(value) => doc.set('date', value)"
             input-class="bg-gray-100 px-3 py-2 text-base"
             :read-only="doc.submitted"
-            :class="doc.submitted && 'pointer-events-none'"
           />
           <FormControl
             :df="getField('entryType')"
@@ -71,7 +69,6 @@
             @change="(value) => doc.set('entryType', value)"
             input-class="bg-gray-100 px-3 py-2 text-base"
             :read-only="doc.submitted"
-            :class="doc.submitted && 'pointer-events-none'"
           />
           <FormControl
             :df="getField('referenceNumber')"
@@ -80,7 +77,6 @@
             @change="(value) => doc.set('referenceNumber', value)"
             input-class="bg-gray-100 p-2 text-base"
             :read-only="doc.submitted"
-            :class="doc.submitted && 'pointer-events-none'"
           />
           <FormControl
             :df="getField('referenceDate')"
@@ -89,7 +85,6 @@
             @change="(value) => doc.set('referenceDate', value)"
             input-class="bg-gray-100 px-3 py-2 text-base"
             :read-only="doc.submitted"
-            :class="doc.submitted && 'pointer-events-none'"
           />
         </div>
         <hr />
@@ -117,7 +112,6 @@
             :df="getField('userRemark')"
             :value="doc.userRemark"
             @change="(value) => doc.set('userRemark', value)"
-            :class="doc.submitted && 'pointer-events-none'"
             :read-only="doc.submitted"
           />
 
@@ -183,7 +177,7 @@ export default {
     };
   },
   activated() {
-    docsPath.value = docsPathMap.JournalEntry
+    docsPath.value = docsPathMap.JournalEntry;
   },
   deactivated() {
     docsPath.value = '';

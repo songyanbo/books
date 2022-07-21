@@ -1,7 +1,7 @@
 <template>
   <div class="flex">
     <div class="flex flex-col flex-1 bg-gray-25">
-      <PageHeader :backLink="true" class="z-10" :border="false">
+      <PageHeader class="z-10" :border="false">
         <Button
           class="text-gray-900 text-xs"
           @click="showCustomiser = !showCustomiser"
@@ -37,7 +37,7 @@
     </div>
 
     <!-- Printview Customizer -->
-    <div class="border-l w-80" v-if="showCustomiser">
+    <div class="border-l w-quick-edit" v-if="showCustomiser">
       <div
         class="px-4 flex items-center justify-between h-row-largest border-b"
       >
