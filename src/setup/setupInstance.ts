@@ -10,7 +10,7 @@ import {
 import { AccountRootTypeEnum } from 'models/baseModels/Account/types';
 import { AccountingSettings } from 'models/baseModels/AccountingSettings/AccountingSettings';
 import { ModelNameEnum } from 'models/types';
-import { initializeInstance } from 'src/initFyo';
+import { initializeInstance, setCurrencySymbols } from 'src/initFyo';
 import { createRegionalRecords } from 'src/regional';
 import { getRandomString } from 'utils';
 import { defaultUOMs } from 'utils/defaults';
@@ -40,6 +40,10 @@ export default async function setupInstance(
   await createDefaultNumberSeries(fyo);
 
   await completeSetup(companyName, fyo);
+  if (!Object.keys(fyo.currencySymbols).length) {
+    await setCurrencySymbols(fyo);
+  }
+
   fyo.store.skipTelemetryLogging = false;
 }
 
@@ -203,24 +207,26 @@ export async function createDiscountAccount(fyo: Fyo) {
 }
 
 async function setDefaultAccounts(fyo: Fyo) {
-  const accountMap: Record<string, string> = {
-    writeOffAccount: fyo.t`Write Off`,
-    roundOffAccount: fyo.t`Rounded Off`,
-  };
+  await setDefaultAccount('writeOffAccount', fyo.t`Write Off`, fyo);
+  const isSet = await setDefaultAccount(
+    'roundOffAccount',
+    fyo.t`Rounded Off`,
+    fyo
+  );
 
-  for (const key in accountMap) {
-    const accountName = accountMap[key];
-    const accountExists = await fyo.db.exists(
-      ModelNameEnum.Account,
-      accountName
-    );
-
-    if (!accountExists) {
-      continue;
-    }
-
-    await fyo.singles.AccountingSettings!.setAndSync(key, accountName);
+  if (!isSet) {
+    await setDefaultAccount('roundOffAccount', fyo.t`Round Off`, fyo);
   }
+}
+
+async function setDefaultAccount(key: string, accountName: string, fyo: Fyo) {
+  const accountExists = await fyo.db.exists(ModelNameEnum.Account, accountName);
+  if (!accountExists) {
+    return false;
+  }
+
+  await fyo.singles.AccountingSettings!.setAndSync(key, accountName);
+  return true;
 }
 
 async function completeSetup(companyName: string, fyo: Fyo) {

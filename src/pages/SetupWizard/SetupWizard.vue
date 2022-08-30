@@ -1,10 +1,14 @@
 <template>
-  <div class="flex-1 bg-gray-25 flex justify-center items-center window-drag">
+  <div
+    class="flex-1 bg-gray-25 flex justify-center items-center"
+    :class="{ 'window-drag': platform !== 'Windows' }"
+  >
     <!-- Setup Wizard Slide -->
     <Slide
       :primary-disabled="!valuesFilled || loading"
       @primary-clicked="handlePrimary"
       @secondary-clicked="handleSecondary"
+      :class="{ 'window-no-drag': platform !== 'Windows' }"
     >
       <template #title>
         {{ t`Setup your organization` }}
