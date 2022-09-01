@@ -1,8 +1,9 @@
 import { app, dialog, ipcMain } from 'electron';
-import { autoUpdater, UpdateInfo } from 'electron-updater';
+import { autoUpdater } from 'electron-updater';
 import fs from 'fs/promises';
 import path from 'path';
 import databaseManager from '../backend/database/manager';
+import { emitMainProcessError } from '../backend/helpers';
 import { Main } from '../main';
 import { DatabaseMethod } from '../utils/db/types';
 import { IPC_ACTIONS } from '../utils/messages';
@@ -11,43 +12,10 @@ import { getLanguageMap } from './getLanguageMap';
 import {
   getConfigFilesWithModified,
   getErrorHandledReponse,
-  setAndGetCleanedConfigFiles,
+  isNetworkError,
+  setAndGetCleanedConfigFiles
 } from './helpers';
 import { saveHtmlAsPdf } from './saveHtmlAsPdf';
-
-autoUpdater.autoDownload = false;
-
-autoUpdater.on('error', (error) => {
-  dialog.showErrorBox(
-    'Update Error: ',
-    error == null ? 'unknown' : (error.stack || error).toString()
-  );
-});
-
-autoUpdater.on('update-available', async (info: UpdateInfo) => {
-  const currentVersion = app.getVersion();
-  const nextVersion = info.version;
-  const isCurrentBeta = currentVersion.includes('beta');
-  const isNextBeta = nextVersion.includes('beta');
-
-  let downloadUpdate = true;
-  if (!isCurrentBeta && isNextBeta) {
-    const option = await dialog.showMessageBox({
-      type: 'info',
-      title: `Update Frappe Books?`,
-      message: `Download version ${nextVersion}?`,
-      buttons: ['Yes', 'No'],
-    });
-
-    downloadUpdate = option.response === 0;
-  }
-
-  if (!downloadUpdate) {
-    return;
-  }
-
-  await autoUpdater.downloadUpdate();
-});
 
 export default function registerIpcMainActionListeners(main: Main) {
   ipcMain.handle(IPC_ACTIONS.GET_OPEN_FILEPATH, async (event, options) => {
@@ -86,10 +54,20 @@ export default function registerIpcMainActionListeners(main: Main) {
   });
 
   ipcMain.handle(IPC_ACTIONS.CHECK_FOR_UPDATES, async () => {
-    if (!main.isDevelopment && !main.checkedForUpdate) {
-      await autoUpdater.checkForUpdates();
-      main.checkedForUpdate = true;
+    if (main.isDevelopment || main.checkedForUpdate) {
+      return;
     }
+
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch (error) {
+      if (isNetworkError(error as Error)) {
+        return;
+      }
+
+      emitMainProcessError(error);
+    }
+    main.checkedForUpdate = true;
   });
 
   ipcMain.handle(IPC_ACTIONS.GET_LANGUAGE_MAP, async (event, code) => {
