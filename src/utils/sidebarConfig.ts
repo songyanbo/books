@@ -1,9 +1,10 @@
 import { t } from 'fyo';
+import { routeFilters } from 'src/utils/filters';
 import { fyo } from '../initFyo';
 import { SidebarConfig, SidebarRoot } from './types';
 
-export function getSidebarConfig(): SidebarConfig {
-  const sideBar = getCompleteSidebar();
+export async function getSidebarConfig(): Promise<SidebarConfig> {
+  const sideBar = await getCompleteSidebar();
   return getFilteredSidebar(sideBar);
 }
 
@@ -53,7 +54,85 @@ function getRegionalSidebar(): SidebarRoot[] {
   ];
 }
 
-function getCompleteSidebar(): SidebarConfig {
+async function getInventorySidebar(): Promise<SidebarRoot[]> {
+  const hasInventory = !!fyo.singles.AccountingSettings?.enableInventory;
+  if (!hasInventory) {
+    return [];
+  }
+
+  return [
+    {
+      label: t`Inventory`,
+      name: 'inventory',
+      icon: 'inventory',
+      iconSize: '18',
+      route: '/list/StockMovement',
+      items: [
+        {
+          label: t`Stock Movement`,
+          name: 'stock-movement',
+          route: '/list/StockMovement',
+          schemaName: 'StockMovement',
+        },
+        {
+          label: t`Shipment`,
+          name: 'shipment',
+          route: '/list/Shipment',
+          schemaName: 'Shipment',
+        },
+        {
+          label: t`Purchase Receipt`,
+          name: 'purchase-receipt',
+          route: '/list/PurchaseReceipt',
+          schemaName: 'PurchaseReceipt',
+        },
+        {
+          label: t`Stock Ledger`,
+          name: 'stock-ledger',
+          route: '/report/StockLedger',
+        },
+        {
+          label: t`Stock Balance`,
+          name: 'stock-balance',
+          route: '/report/StockBalance',
+        }
+      ],
+    },
+  ];
+}
+
+async function getReportSidebar() {
+  return {
+    label: t`Reports`,
+    name: 'reports',
+    icon: 'reports',
+    route: '/report/GeneralLedger',
+    items: [
+      {
+        label: t`General Ledger`,
+        name: 'general-ledger',
+        route: '/report/GeneralLedger',
+      },
+      {
+        label: t`Profit And Loss`,
+        name: 'profit-and-loss',
+        route: '/report/ProfitAndLoss',
+      },
+      {
+        label: t`Balance Sheet`,
+        name: 'balance-sheet',
+        route: '/report/BalanceSheet',
+      },
+      {
+        label: t`Trial Balance`,
+        name: 'trial-balance',
+        route: '/report/TrialBalance',
+      },
+    ],
+  };
+}
+
+async function getCompleteSidebar(): Promise<SidebarConfig> {
   return [
     {
       label: t`Get Started`,
@@ -85,20 +164,23 @@ function getCompleteSidebar(): SidebarConfig {
         {
           label: t`Sales Payments`,
           name: 'payments',
-          route: `/list/Payment/paymentType/Receive/${t`Sales Payments`}`,
+          route: `/list/Payment/${t`Sales Payments`}`,
           schemaName: 'Payment',
+          filters: routeFilters.SalesPayments,
         },
         {
           label: t`Customers`,
           name: 'customers',
-          route: `/list/Party/role/Customer/${t`Customers`}`,
+          route: `/list/Party/${t`Customers`}`,
           schemaName: 'Party',
+          filters: routeFilters.Customers,
         },
         {
           label: t`Sales Items`,
           name: 'sales-items',
-          route: `/list/Item/for/Sales/${t`Sales Items`}`,
+          route: `/list/Item/${t`Sales Items`}`,
           schemaName: 'Item',
+          filters: routeFilters.SalesItems,
         },
       ],
     },
@@ -117,20 +199,23 @@ function getCompleteSidebar(): SidebarConfig {
         {
           label: t`Purchase Payments`,
           name: 'payments',
-          route: `/list/Payment/paymentType/Pay/${t`Purchase Payments`}`,
+          route: `/list/Payment/${t`Purchase Payments`}`,
           schemaName: 'Payment',
+          filters: routeFilters.PurchasePayments,
         },
         {
           label: t`Suppliers`,
           name: 'suppliers',
-          route: `/list/Party/role/Supplier/${t`Suppliers`}`,
+          route: `/list/Party/${t`Suppliers`}`,
           schemaName: 'Party',
+          filters: routeFilters.Suppliers,
         },
         {
           label: t`Purchase Items`,
           name: 'purchase-items',
-          route: `/list/Item/for/Purchases/${t`Purchase Items`}`,
+          route: `/list/Item/${t`Purchase Items`}`,
           schemaName: 'Item',
+          filters: routeFilters.PurchaseItems,
         },
       ],
     },
@@ -149,46 +234,22 @@ function getCompleteSidebar(): SidebarConfig {
         {
           label: t`Party`,
           name: 'party',
-          route: '/list/Party/role/Both',
+          route: '/list/Party',
           schemaName: 'Party',
+          filters: { role: 'Both' },
         },
         {
-          label: t`Common Items`,
+          label: t`Items`,
           name: 'common-items',
-          route: `/list/Item/for/Both/${t`Common Items`}`,
+          route: `/list/Item/${t`Items`}`,
           schemaName: 'Item',
+          filters: { for: 'Both' },
         },
       ],
     },
-    {
-      label: t`Reports`,
-      name: 'reports',
-      icon: 'reports',
-      route: '/report/GeneralLedger',
-      items: [
-        {
-          label: t`General Ledger`,
-          name: 'general-ledger',
-          route: '/report/GeneralLedger',
-        },
-        {
-          label: t`Profit And Loss`,
-          name: 'profit-and-loss',
-          route: '/report/ProfitAndLoss',
-        },
-        {
-          label: t`Balance Sheet`,
-          name: 'balance-sheet',
-          route: '/report/BalanceSheet',
-        },
-        {
-          label: t`Trial Balance`,
-          name: 'trial-balance',
-          route: '/report/TrialBalance',
-        },
-      ],
-    },
-    ...getRegionalSidebar(),
+    await getReportSidebar(),
+    await getInventorySidebar(),
+    await getRegionalSidebar(),
     {
       label: t`Setup`,
       name: 'setup',
@@ -207,9 +268,14 @@ function getCompleteSidebar(): SidebarConfig {
           schemaName: 'Tax',
         },
         {
-          label: t`Data Import`,
-          name: 'data-import',
-          route: '/data-import',
+          label: t`Import Wizard`,
+          name: 'import-wizard',
+          route: '/import-wizard',
+        },
+        {
+          label: t`Print Templates`,
+          name: 'print-template',
+          route: `/list/PrintTemplate/${t`Print Templates`}`,
         },
         {
           label: t`Settings`,
@@ -218,5 +284,5 @@ function getCompleteSidebar(): SidebarConfig {
         },
       ],
     },
-  ];
+  ].flat();
 }

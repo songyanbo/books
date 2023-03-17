@@ -4,8 +4,12 @@ import {
   DefaultMap,
   FiltersMap,
   ListViewSettings,
+  RequiredMap,
   TreeViewSettings,
+  ReadOnlyMap,
+  FormulaMap,
 } from 'fyo/model/types';
+import { ModelNameEnum } from 'models/types';
 import { QueryFilter } from 'utils/db/types';
 import { AccountRootType, AccountRootTypeEnum, AccountType } from './types';
 
@@ -25,6 +29,16 @@ export class Account extends Doc {
   get isCredit() {
     return !this.isDebit;
   }
+
+  required: RequiredMap = {
+    /**
+     * Added here cause rootAccounts don't have parents
+     * they are created during initialization. if this is
+     * added to the schema it will cause NOT NULL errors
+     */
+
+    parentAccount: () => !!this.fyo.singles?.AccountingSettings?.setupComplete,
+  };
 
   static defaults: DefaultMap = {
     /**
@@ -64,6 +78,22 @@ export class Account extends Doc {
     };
   }
 
+  formulas: FormulaMap = {
+    rootType: {
+      formula: async () => {
+        if (!this.parentAccount) {
+          return;
+        }
+
+        return await this.fyo.getValue(
+          ModelNameEnum.Account,
+          this.parentAccount,
+          'rootType'
+        );
+      },
+    },
+  };
+
   static filters: FiltersMap = {
     parentAccount: (doc: Doc) => {
       const filter: QueryFilter = {
@@ -76,5 +106,12 @@ export class Account extends Doc {
 
       return filter;
     },
+  };
+
+  readOnly: ReadOnlyMap = {
+    rootType: () => this.inserted,
+    parentAccount: () => this.inserted,
+    accountType: () => !!this.accountType && this.inserted,
+    isGroup: () => this.inserted,
   };
 }

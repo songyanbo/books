@@ -21,8 +21,7 @@ export const sqliteTypeMap: Record<string, KnexColumnType> = {
   DynamicLink: 'text',
   Password: 'text',
   Select: 'text',
-  File: 'binary',
-  Attach: 'text',
+  Attachment: 'text',
   AttachImage: 'text',
   Color: 'text',
 };
@@ -47,6 +46,7 @@ export const databaseMethodSet: Set<DatabaseMethod> = new Set([
   'rename',
   'update',
   'delete',
+  'deleteAll',
   'close',
   'exists',
 ]);

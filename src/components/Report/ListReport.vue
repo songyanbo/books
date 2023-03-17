@@ -16,11 +16,12 @@
           :key="c + '-col'"
           :style="getCellStyle(col, c)"
           class="
-            text-gray-600 text-base
+            text-base
             px-3
             flex-shrink-0
             overflow-x-auto
             whitespace-nowrap
+            no-scrollbar
           "
         >
           {{ col.label }}
@@ -53,12 +54,14 @@
               :key="`${c}-${r}-cell`"
               :style="getCellStyle(cell, c)"
               class="
-                text-gray-900 text-base
+                text-base
                 px-3
                 flex-shrink-0
                 overflow-x-auto
                 whitespace-nowrap
+                no-scrollbar
               "
+              :class="[getCellColorClass(cell)]"
             >
               {{ cell.value }}
             </div>
@@ -73,7 +76,6 @@
 
     <!-- Pagination Footer -->
     <div class="mt-auto flex-shrink-0" v-if="report.usePagination">
-      <hr />
       <Paginator
         :item-count="report?.reportData?.length ?? 0"
         class="px-4"
@@ -85,7 +87,7 @@
 </template>
 <script>
 import { Report } from 'reports/Report';
-import { FieldTypeEnum } from 'schemas/types';
+import { isNumeric } from 'src/utils';
 import { defineComponent } from 'vue';
 import Paginator from '../Paginator.vue';
 import WithScroll from '../WithScroll.vue';
@@ -94,6 +96,7 @@ export default defineComponent({
   props: {
     report: Report,
   },
+  inject: ['languageDirection'],
   data() {
     return {
       wconst: 8,
@@ -138,7 +141,12 @@ export default defineComponent({
     getCellStyle(cell, i) {
       const styles = {};
       const width = cell.width ?? 1;
-      const align = cell.align ?? 'left';
+
+      let align = cell.align ?? 'left';
+      if (this.languageDirection === 'rtl') {
+        align = this.languageDirection === 'rtl' ? 'right' : 'left';
+      }
+
       styles['width'] = `${width * this.wconst}rem`;
       styles['text-align'] = align;
 
@@ -151,35 +159,60 @@ export default defineComponent({
       }
 
       if (i === 0) {
-        styles['padding-left'] = '0px';
+        if (this.languageDirection === 'rtl') {
+          styles['padding-right'] = '0px';
+        } else {
+          styles['padding-left'] = '0px';
+        }
       }
 
-      if (
-        !cell.align &&
-        [
-          FieldTypeEnum.Currency,
-          FieldTypeEnum.Int,
-          FieldTypeEnum.Float,
-        ].includes(cell.fieldtype)
-      ) {
+      if (!cell.align && isNumeric(cell.fieldtype)) {
         styles['text-align'] = 'right';
       }
 
       if (i === this.report.columns.length - 1) {
-        styles['padding-right'] = '0px';
+        if (this.languageDirection === 'rtl') {
+          styles['padding-left'] = '0px';
+        } else {
+          styles['padding-right'] = '0px';
+        }
       }
 
       if (cell.indent) {
-        styles['padding-left'] = `${cell.indent * 2}rem`;
-      }
-
-      if (cell.color === 'red') {
-        styles['color'] = '#e53e3e';
-      } else if (cell.color === 'green') {
-        styles['color'] = '#38a169';
+        if (this.languageDirection === 'rtl') {
+          styles['padding-right'] = `${cell.indent * 2}rem`;
+        } else {
+          styles['padding-left'] = `${cell.indent * 2}rem`;
+        }
       }
 
       return styles;
+    },
+    getCellColorClass(cell) {
+      if (cell.color === 'red') {
+        return 'text-red-600';
+      } else if (cell.color === 'green') {
+        return 'text-green-600';
+      }
+
+      if (!cell.rawValue) {
+        return 'text-gray-600';
+      }
+
+      if (typeof cell.rawValue !== 'number') {
+        return 'text-gray-900';
+      }
+
+      if (cell.rawValue === 0) {
+        return 'text-gray-600';
+      }
+
+      const prec = this.fyo?.singles?.displayPrecision ?? 2;
+      if (Number(cell.rawValue.toFixed(prec)) === 0) {
+        return 'text-gray-600';
+      }
+
+      return 'text-gray-900';
     },
   },
   components: { Paginator, WithScroll },

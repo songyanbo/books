@@ -2,6 +2,8 @@
   <div
     id="app"
     class="h-screen flex flex-col font-sans overflow-hidden antialiased"
+    :dir="languageDirection"
+    :language="language"
   >
     <WindowsTitleBar
       v-if="platform === 'Windows'"
@@ -27,7 +29,7 @@
     <!-- Render target for toasts -->
     <div
       id="toast-container"
-      class="absolute bottom-0 flex flex-col items-end mb-3 pr-6"
+      class="absolute bottom-0 flex flex-col items-end mb-3 pe-6"
       style="width: 100%"
     >
       <div id="toast-target" />
@@ -37,34 +39,47 @@
 
 <script>
 import { ConfigKeys } from 'fyo/core/types';
+import { RTL_LANGUAGES } from 'fyo/utils/consts';
 import { ModelNameEnum } from 'models/types';
+import { systemLanguageRef } from 'src/utils/refs';
 import { computed } from 'vue';
 import WindowsTitleBar from './components/WindowsTitleBar.vue';
 import { handleErrorWithDialog } from './errorHandling';
-import { fyo, initializeInstance } from './initFyo';
+import { fyo } from './initFyo';
 import DatabaseSelector from './pages/DatabaseSelector.vue';
 import Desk from './pages/Desk.vue';
 import SetupWizard from './pages/SetupWizard/SetupWizard.vue';
 import setupInstance from './setup/setupInstance';
 import './styles/index.css';
+import { initializeInstance } from './utils/initialization';
 import { checkForUpdates } from './utils/ipcCalls';
 import { updateConfigFiles } from './utils/misc';
+import { updatePrintTemplates } from './utils/printTemplates';
 import { Search } from './utils/search';
+import { setGlobalShortcuts } from './utils/shortcuts';
 import { routeTo } from './utils/ui';
+import { Shortcuts, useKeys } from './utils/vueUtils';
 
 export default {
   name: 'App',
+  setup() {
+    return { keys: useKeys() };
+  },
   data() {
     return {
       activeScreen: null,
       dbPath: '',
       companyName: '',
       searcher: null,
+      shortcuts: null,
     };
   },
   provide() {
     return {
+      languageDirection: computed(() => this.languageDirection),
       searcher: computed(() => this.searcher),
+      shortcuts: computed(() => this.shortcuts),
+      keys: computed(() => this.keys),
     };
   },
   components: {
@@ -74,6 +89,8 @@ export default {
     WindowsTitleBar,
   },
   async mounted() {
+    const shortcuts = new Shortcuts(this.keys);
+    this.shortcuts = shortcuts;
     const lastSelectedFilePath = fyo.config.get(
       ConfigKeys.LastSelectedFilePath,
       null
@@ -89,6 +106,16 @@ export default {
       await handleErrorWithDialog(err, undefined, true, true);
       await this.showDbSelector();
     }
+
+    setGlobalShortcuts(shortcuts);
+  },
+  computed: {
+    language() {
+      return systemLanguageRef.value;
+    },
+    languageDirection() {
+      return RTL_LANGUAGES.includes(this.language) ? 'rtl' : 'ltr';
+    },
   },
   methods: {
     async setDesk(filePath) {
@@ -102,7 +129,7 @@ export default {
         'companyName'
       );
       await this.setSearcher();
-      await updateConfigFiles(fyo);
+      updateConfigFiles(fyo);
     },
     async setSearcher() {
       this.searcher = new Search(fyo);
@@ -134,6 +161,7 @@ export default {
       }
 
       await initializeInstance(filePath, false, countryCode, fyo);
+      await updatePrintTemplates(fyo);
       await this.setDesk(filePath);
     },
     async setDeskRoute() {

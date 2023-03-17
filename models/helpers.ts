@@ -1,83 +1,125 @@
 import { Fyo, t } from 'fyo';
 import { Doc } from 'fyo/model/doc';
 import { Action, ColumnConfig, DocStatus, RenderData } from 'fyo/model/types';
-import { NotFoundError } from 'fyo/utils/errors';
 import { DateTime } from 'luxon';
 import { Money } from 'pesa';
+import { safeParseFloat } from 'utils/index';
 import { Router } from 'vue-router';
 import {
   AccountRootType,
   AccountRootTypeEnum,
 } from './baseModels/Account/types';
+import {
+  Defaults,
+  numberSeriesDefaultsMap,
+} from './baseModels/Defaults/Defaults';
+import { Invoice } from './baseModels/Invoice/Invoice';
+import { StockMovement } from './inventory/StockMovement';
+import { StockTransfer } from './inventory/StockTransfer';
 import { InvoiceStatus, ModelNameEnum } from './types';
 
 export function getInvoiceActions(
-  schemaName: ModelNameEnum.PurchaseInvoice | ModelNameEnum.SalesInvoice,
-  fyo: Fyo
+  fyo: Fyo,
+  schemaName: ModelNameEnum.SalesInvoice | ModelNameEnum.PurchaseInvoice
 ): Action[] {
   return [
-    {
-      label: fyo.t`Make Payment`,
-      condition: (doc: Doc) =>
-        doc.isSubmitted && !(doc.outstandingAmount as Money).isZero(),
-      action: async function makePayment(doc: Doc) {
-        const payment = fyo.doc.getNewDoc('Payment');
-        payment.once('afterSync', async () => {
-          await payment.submit();
-        });
-
-        const isSales = schemaName === 'SalesInvoice';
-        const party = doc.party as string;
-        const paymentType = isSales ? 'Receive' : 'Pay';
-        const hideAccountField = isSales ? 'account' : 'paymentAccount';
-
-        const { openQuickEdit } = await import('src/utils/ui');
-        await openQuickEdit({
-          schemaName: 'Payment',
-          name: payment.name as string,
-          hideFields: ['party', 'date', hideAccountField, 'paymentType', 'for'],
-          defaults: {
-            party,
-            [hideAccountField]: doc.account,
-            date: new Date().toISOString().slice(0, 10),
-            paymentType,
-            for: [
-              {
-                referenceType: doc.schemaName,
-                referenceName: doc.name,
-                amount: doc.outstandingAmount,
-              },
-            ],
-          },
-        });
-      },
-    },
+    getMakePaymentAction(fyo),
+    getMakeStockTransferAction(fyo, schemaName),
     getLedgerLinkAction(fyo),
   ];
 }
 
-export function getLedgerLinkAction(fyo: Fyo): Action {
+export function getMakeStockTransferAction(
+  fyo: Fyo,
+  schemaName: ModelNameEnum.SalesInvoice | ModelNameEnum.PurchaseInvoice
+): Action {
+  let label = fyo.t`Shipment`;
+  if (schemaName === ModelNameEnum.PurchaseInvoice) {
+    label = fyo.t`Purchase Receipt`;
+  }
+
   return {
-    label: fyo.t`Ledger Entries`,
-    condition: (doc: Doc) => doc.isSubmitted,
-    action: async (doc: Doc, router: Router) => {
-      router.push({
-        name: 'Report',
-        params: {
-          reportClassName: 'GeneralLedger',
-          defaultFilters: JSON.stringify({
-            referenceType: doc.schemaName,
-            referenceName: doc.name,
-          }),
-        },
+    label,
+    group: fyo.t`Create`,
+    condition: (doc: Doc) => doc.isSubmitted && !!doc.stockNotTransferred,
+    action: async (doc: Doc) => {
+      const transfer = await (doc as Invoice).getStockTransfer();
+      if (!transfer) {
+        return;
+      }
+
+      const { routeTo } = await import('src/utils/ui');
+      const path = `/edit/${transfer.schemaName}/${transfer.name}`;
+      await routeTo(path);
+    },
+  };
+}
+
+export function getMakePaymentAction(fyo: Fyo): Action {
+  return {
+    label: fyo.t`Payment`,
+    group: fyo.t`Create`,
+    condition: (doc: Doc) =>
+      doc.isSubmitted && !(doc.outstandingAmount as Money).isZero(),
+    action: async (doc: Doc) => {
+      const payment = (doc as Invoice).getPayment();
+      if (!payment) {
+        return;
+      }
+
+      payment.once('afterSync', async () => {
+        await payment.submit();
+      });
+
+      const { openQuickEdit } = await import('src/utils/ui');
+      await openQuickEdit({
+        doc: payment,
+        hideFields: ['party', 'paymentType', 'for'],
       });
     },
   };
 }
 
-export function getTransactionStatusColumn(): ColumnConfig {
-  const statusMap = getStatusMap();
+export function getLedgerLinkAction(
+  fyo: Fyo,
+  isStock: boolean = false
+): Action {
+  let label = fyo.t`Accounting Entries`;
+  let reportClassName: 'GeneralLedger' | 'StockLedger' = 'GeneralLedger';
 
+  if (isStock) {
+    label = fyo.t`Stock Entries`;
+    reportClassName = 'StockLedger';
+  }
+
+  return {
+    label,
+    group: fyo.t`View`,
+    condition: (doc: Doc) => doc.isSubmitted,
+    action: async (doc: Doc, router: Router) => {
+      const route = getLedgerLink(doc, reportClassName);
+      router.push(route);
+    },
+  };
+}
+
+export function getLedgerLink(
+  doc: Doc,
+  reportClassName: 'GeneralLedger' | 'StockLedger'
+) {
+  return {
+    name: 'Report',
+    params: {
+      reportClassName,
+      defaultFilters: JSON.stringify({
+        referenceType: doc.schemaName,
+        referenceName: doc.name,
+      }),
+    },
+  };
+}
+
+export function getTransactionStatusColumn(): ColumnConfig {
   return {
     label: t`Status`,
     fieldname: 'status',
@@ -85,7 +127,7 @@ export function getTransactionStatusColumn(): ColumnConfig {
     render(doc) {
       const status = getDocStatus(doc) as InvoiceStatus;
       const color = statusColor[status];
-      const label = statusMap[status];
+      const label = getStatusText(status);
 
       return {
         template: `<Badge class="text-xs" color="${color}">${label}</Badge>`,
@@ -108,17 +150,25 @@ export const statusColor: Record<
   Cancelled: 'red',
 };
 
-export function getStatusMap(): Record<DocStatus | InvoiceStatus, string> {
-  return {
-    '': '',
-    Draft: t`Draft`,
-    Unpaid: t`Unpaid`,
-    Paid: t`Paid`,
-    Saved: t`Saved`,
-    NotSaved: t`Not Saved`,
-    Submitted: t`Submitted`,
-    Cancelled: t`Cancelled`,
-  };
+export function getStatusText(status: DocStatus | InvoiceStatus): string {
+  switch (status) {
+    case 'Draft':
+      return t`Draft`;
+    case 'Saved':
+      return t`Saved`;
+    case 'NotSaved':
+      return t`Not Saved`;
+    case 'Submitted':
+      return t`Submitted`;
+    case 'Cancelled':
+      return t`Cancelled`;
+    case 'Paid':
+      return t`Paid`;
+    case 'Unpaid':
+      return t`Unpaid`;
+    default:
+      return '';
+  }
 }
 
 export function getDocStatus(
@@ -196,45 +246,40 @@ export async function getExchangeRate({
   toCurrency: string;
   date?: string;
 }) {
-  if (!date) {
-    date = DateTime.local().toISODate();
+  if (!fetch) {
+    return 1;
   }
 
-  if (!fromCurrency || !toCurrency) {
-    throw new NotFoundError(
-      'Please provide `fromCurrency` and `toCurrency` to get exchange rate.'
-    );
+  if (!date) {
+    date = DateTime.local().toISODate();
   }
 
   const cacheKey = `currencyExchangeRate:${date}:${fromCurrency}:${toCurrency}`;
 
   let exchangeRate = 0;
   if (localStorage) {
-    exchangeRate = parseFloat(
+    exchangeRate = safeParseFloat(
       localStorage.getItem(cacheKey as string) as string
     );
   }
 
-  if (!exchangeRate && fetch) {
-    try {
-      const res = await fetch(
-        ` https://api.vatcomply.com/rates?date=${date}&base=${fromCurrency}&symbols=${toCurrency}`
-      );
-      const data = await res.json();
-      exchangeRate = data.rates[toCurrency];
+  if (exchangeRate && exchangeRate !== 1) {
+    return exchangeRate;
+  }
 
-      if (localStorage) {
-        localStorage.setItem(cacheKey, String(exchangeRate));
-      }
-    } catch (error) {
-      console.error(error);
-      throw new NotFoundError(
-        `Could not fetch exchange rate for ${fromCurrency} -> ${toCurrency}`,
-        false
-      );
-    }
-  } else {
-    exchangeRate = 1;
+  try {
+    const res = await fetch(
+      `https://api.vatcomply.com/rates?date=${date}&base=${fromCurrency}&symbols=${toCurrency}`
+    );
+    const data = await res.json();
+    exchangeRate = data.rates[toCurrency];
+  } catch (error) {
+    console.error(error);
+    exchangeRate ??= 1;
+  }
+
+  if (localStorage) {
+    localStorage.setItem(cacheKey, String(exchangeRate));
   }
 
   return exchangeRate;
@@ -255,4 +300,57 @@ export function isCredit(rootType: AccountRootType) {
     default:
       return true;
   }
+}
+
+export function getNumberSeries(schemaName: string, fyo: Fyo) {
+  const numberSeriesKey = numberSeriesDefaultsMap[schemaName];
+  if (!numberSeriesKey) {
+    return undefined;
+  }
+
+  const defaults = fyo.singles.Defaults as Defaults | undefined;
+  const field = fyo.getField(schemaName, 'numberSeries');
+  const value = defaults?.[numberSeriesKey] as string | undefined;
+  return value ?? (field?.default as string | undefined);
+}
+
+export function getDocStatusListColumn(): ColumnConfig {
+  return {
+    label: t`Status`,
+    fieldname: 'status',
+    fieldtype: 'Select',
+    render(doc) {
+      const status = getDocStatus(doc);
+      const color = statusColor[status] ?? 'gray';
+      const label = getStatusText(status);
+
+      return {
+        template: `<Badge class="text-xs" color="${color}">${label}</Badge>`,
+      };
+    },
+  };
+}
+
+type ModelsWithItems = Invoice | StockTransfer | StockMovement;
+export async function addItem<M extends ModelsWithItems>(name: string, doc: M) {
+  if (!doc.canEdit) {
+    return;
+  }
+
+  const items = (doc.items ?? []) as NonNullable<M['items']>[number][];
+
+  let item = items.find((i) => i.item === name);
+  if (item) {
+    const q = item.quantity ?? 0;
+    await item.set('quantity', q + 1);
+    return;
+  }
+
+  await doc.append('items');
+  item = doc.items?.at(-1);
+  if (!item) {
+    return;
+  }
+
+  await item.set('item', name);
 }

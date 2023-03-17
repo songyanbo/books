@@ -6,7 +6,7 @@ export function getValueMapFromList<T, K extends keyof T, V extends keyof T>(
   key: K,
   valueKey: V,
   filterUndefined: boolean = true
-): Record<string, unknown> {
+): Record<string, T[V]> {
   if (filterUndefined) {
     list = list.filter(
       (f) =>
@@ -20,7 +20,7 @@ export function getValueMapFromList<T, K extends keyof T, V extends keyof T>(
     const value = f[valueKey];
     acc[keyValue] = value;
     return acc;
-  }, {} as Record<string, unknown>);
+  }, {} as Record<string, T[V]>);
 }
 
 export function getRandomString(): string {
@@ -37,6 +37,10 @@ export function getMapFromList<T, K extends keyof T>(
   list: T[],
   name: K
 ): Record<string, T> {
+  /**
+   * Do not convert function to use copies of T
+   * instead of references.
+   */
   const acc: Record<string, T> = {};
   for (const t of list) {
     const key = t[name];
@@ -79,7 +83,7 @@ export function getListFromMap<T>(map: Record<string, T>): T[] {
   return Object.keys(map).map((n) => map[n]);
 }
 
-export function getIsNullOrUndef(value: unknown): boolean {
+export function getIsNullOrUndef(value: unknown): value is null | undefined {
   return value === null || value === undefined;
 }
 
@@ -152,4 +156,87 @@ export function deleteKeys<T>(
   }
 
   return dest;
+}
+
+function safeParseNumber(value: unknown, parser: (v: string) => number) {
+  let parsed: number;
+  switch (typeof value) {
+    case 'string':
+      parsed = parser(value);
+      break;
+    case 'number':
+      parsed = value;
+      break;
+    default:
+      parsed = Number(value);
+      break;
+  }
+
+  if (Number.isNaN(parsed)) {
+    return 0;
+  }
+
+  return parsed;
+}
+
+export function safeParseFloat(value: unknown): number {
+  return safeParseNumber(value, parseFloat);
+}
+
+export function safeParseInt(value: unknown): number {
+  return safeParseNumber(value, parseInt);
+}
+
+export function joinMapLists<A, B>(
+  listA: A[],
+  listB: B[],
+  keyA: keyof A,
+  keyB: keyof B
+): (A & B)[] {
+  const mapA = getMapFromList(listA, keyA);
+  const mapB = getMapFromList(listB, keyB);
+
+  const keyListA = listA
+    .map((i) => i[keyA])
+    .filter((k) => (k as unknown as string) in mapB);
+
+  const keyListB = listB
+    .map((i) => i[keyB])
+    .filter((k) => (k as unknown as string) in mapA);
+
+  const keys = new Set([keyListA, keyListB].flat().sort());
+
+  const joint: (A & B)[] = [];
+  for (const k of keys) {
+    const a = mapA[k as unknown as string];
+    const b = mapB[k as unknown as string];
+    const c = { ...a, ...b };
+
+    joint.push(c);
+  }
+
+  return joint;
+}
+
+export function removeAtIndex<T>(array: T[], index: number): T[] {
+  if (index < 0 || index >= array.length) {
+    return array;
+  }
+
+  return [...array.slice(0, index), ...array.slice(index + 1)];
+}
+
+export function objectForEach<T extends object | unknown>(
+  obj: T,
+  func: Function
+) {
+  if (typeof obj !== 'object' || obj === null) {
+    return func(obj);
+  }
+
+  for (const key in obj) {
+    obj[key] = objectForEach(obj[key], func);
+  }
+
+  return func(obj);
 }

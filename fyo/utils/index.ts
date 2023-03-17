@@ -1,9 +1,10 @@
 import { Fyo } from 'fyo';
+import { DocValue } from 'fyo/core/types';
 import { Doc } from 'fyo/model/doc';
-import { Action, DocStatus } from 'fyo/model/types';
+import { Action } from 'fyo/model/types';
 import { Money } from 'pesa';
-import { Field, OptionField, SelectOption } from 'schemas/types';
-import { getIsNullOrUndef } from 'utils';
+import { Field, FieldType, OptionField, SelectOption } from 'schemas/types';
+import { getIsNullOrUndef, safeParseInt } from 'utils';
 
 export function slug(str: string) {
   return str
@@ -24,7 +25,7 @@ export function unique<T>(list: T[], key = (it: T) => String(it)) {
 export function getDuplicates(array: unknown[]) {
   const duplicates: unknown[] = [];
   for (const i in array) {
-    const previous = array[parseInt(i) - 1];
+    const previous = array[safeParseInt(i) - 1];
     const current = array[i];
 
     if (current === previous) {
@@ -36,7 +37,7 @@ export function getDuplicates(array: unknown[]) {
   return duplicates;
 }
 
-export function isPesa(value: unknown): boolean {
+export function isPesa(value: unknown): value is Money {
   return value instanceof Money;
 }
 
@@ -108,4 +109,35 @@ function getRawOptionList(field: Field, doc: Doc | undefined | null) {
   }
 
   return getList(doc!);
+}
+
+export function getEmptyValuesByFieldTypes(
+  fieldtype: FieldType,
+  fyo: Fyo
+): DocValue {
+  switch (fieldtype) {
+    case 'Date':
+    case 'Datetime':
+      return new Date();
+    case 'Float':
+    case 'Int':
+      return 0;
+    case 'Currency':
+      return fyo.pesa(0);
+    case 'Check':
+      return false;
+    case 'DynamicLink':
+    case 'Link':
+    case 'Select':
+    case 'AutoComplete':
+    case 'Text':
+    case 'Data':
+    case 'Color':
+      return null;
+    case 'Table':
+    case 'Attachment':
+    case 'AttachImage':
+    default:
+      return null;
+  }
 }

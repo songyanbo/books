@@ -72,6 +72,7 @@
           v-for="(file, i) in files"
           :key="file.dbPath"
           @click="selectFile(file)"
+          :title="t`${file.companyName} stored at ${file.dbPath}`"
         >
           <div
             class="
@@ -91,23 +92,28 @@
             {{ i + 1 }}
           </div>
           <div class="w-full">
-            <p class="font-medium">
-              {{ file.companyName }}
-            </p>
-            <div
-              class="text-sm text-gray-600 flex justify-between overflow-x-auto"
-            >
-              <p class="whitespace-nowrap mr-2">
+            <div class="flex justify-between overflow-x-auto items-baseline">
+              <h2 class="font-medium">
+                {{ file.companyName }}
+              </h2>
+              <p class="whitespace-nowrap text-sm text-gray-600">
                 {{ formatDate(file.modified) }}
               </p>
-              <p class="text-right" v-if="fyo.store.isDevelopment">
-                {{ file.dbPath }}
-              </p>
             </div>
+            <p
+              class="
+                text-sm text-gray-600
+                overflow-x-auto
+                no-scrollbar
+                whitespace-nowrap
+              "
+            >
+              {{ truncate(file.dbPath) }}
+            </p>
           </div>
           <button
             class="
-              ml-auto
+              ms-auto
               p-2
               hover:bg-red-200
               rounded-full
@@ -137,17 +143,13 @@
         "
         style="top: 100%; transform: translateY(-100%)"
       >
-        <LanguageSelector
-          v-show="!creatingDemo"
-          class="text-sm w-28 bg-gray-100 rounded-md"
-          input-class="py-1.5 bg-transparent"
-        />
+        <LanguageSelector v-show="!creatingDemo" class="text-sm w-28" />
         <button
           class="
             text-sm
             bg-gray-100
             hover:bg-gray-200
-            rounded-md
+            rounded
             px-4
             py-1.5
             w-28
@@ -171,7 +173,7 @@
 
     <!-- Base Count Selection when Dev -->
     <Modal :open-modal="openModal" @closemodal="openModal = false">
-      <div class="p-4 text-gray-900">
+      <div class="p-4 text-gray-900 w-form">
         <h2 class="text-xl font-semibold select-none">Set Base Count</h2>
         <p class="text-base mt-2">
           Base Count is a lower bound on the number of entries made when
@@ -248,6 +250,13 @@ export default {
     }
   },
   methods: {
+    truncate(value) {
+      if (value.length < 72) {
+        return value;
+      }
+
+      return '...' + value.slice(value.length - 72);
+    },
     formatDate(isoDate) {
       return DateTime.fromISO(isoDate).toRelative();
     },
@@ -305,7 +314,9 @@ export default {
       this.creatingDemo = false;
     },
     async setFiles() {
-      this.files = await ipcRenderer.invoke(IPC_ACTIONS.GET_DB_LIST);
+      this.files = (await ipcRenderer.invoke(IPC_ACTIONS.GET_DB_LIST))?.sort(
+        (a, b) => Date.parse(b.modified) - Date.parse(a.modified)
+      );
     },
     async newDatabase() {
       if (this.creatingDemo) {

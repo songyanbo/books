@@ -1,23 +1,26 @@
 <template>
   <div>
-    <div class="text-gray-600 text-sm mb-1" v-if="showLabel">
+    <div :class="labelClasses" v-if="showLabel">
       {{ df.label }}
     </div>
     <input
       v-show="showInput"
       ref="input"
-      :class="inputClasses"
+      class="text-end"
+      :class="[inputClasses, containerClasses]"
       :type="inputType"
       :value="value?.round()"
       :placeholder="inputPlaceholder"
       :readonly="isReadOnly"
+      :tabindex="isReadOnly ? '-1' : '0'"
       @blur="onBlur"
       @focus="onFocus"
       @input="(e) => $emit('input', e)"
     />
     <div
       v-show="!showInput"
-      :class="[inputClasses, 'cursor-text whitespace-nowrap overflow-x-auto']"
+      class="whitespace-nowrap overflow-x-auto"
+      :class="[inputClasses, containerClasses, ,]"
       @click="activateInput"
       @focus="activateInput"
       tabindex="0"
@@ -61,6 +64,10 @@ export default {
       this.triggerChange(value);
     },
     activateInput() {
+      if (this.isReadOnly) {
+        return;
+      }
+
       this.showInput = true;
       nextTick(() => {
         this.focus();

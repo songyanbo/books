@@ -4,13 +4,14 @@ import {
   Action,
   DefaultMap,
   FiltersMap,
+  HiddenMap,
   ListViewSettings,
 } from 'fyo/model/types';
-import { DateTime } from 'luxon';
 import {
   getDocStatus,
   getLedgerLinkAction,
-  getStatusMap,
+  getNumberSeries,
+  getStatusText,
   statusColor,
 } from 'models/helpers';
 import { Transactional } from 'models/Transactional/Transactional';
@@ -38,8 +39,20 @@ export class JournalEntry extends Transactional {
     return posting;
   }
 
+  hidden: HiddenMap = {
+    referenceNumber: () =>
+      !(this.referenceNumber || !(this.isSubmitted || this.isCancelled)),
+    referenceDate: () =>
+      !(this.referenceDate || !(this.isSubmitted || this.isCancelled)),
+    userRemark: () =>
+      !(this.userRemark || !(this.isSubmitted || this.isCancelled)),
+    attachment: () =>
+      !(this.attachment || !(this.isSubmitted || this.isCancelled)),
+  };
+
   static defaults: DefaultMap = {
-    date: () => DateTime.local().toISODate(),
+    numberSeries: (doc) => getNumberSeries(doc.schemaName, doc.fyo),
+    date: () => new Date(),
   };
 
   static filters: FiltersMap = {
@@ -57,12 +70,12 @@ export class JournalEntry extends Transactional {
         'name',
         {
           label: t`Status`,
+          fieldname: 'status',
           fieldtype: 'Select',
-          size: 'small',
           render(doc) {
             const status = getDocStatus(doc);
             const color = statusColor[status] ?? 'gray';
-            const label = getStatusMap()[status];
+            const label = getStatusText(status);
 
             return {
               template: `<Badge class="text-xs" color="${color}">${label}</Badge>`,

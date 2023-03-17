@@ -10,29 +10,34 @@ import {
   HiddenMap,
   ListViewSettings,
   RequiredMap,
-  ValidationMap
+  ValidationMap,
 } from 'fyo/model/types';
-import { ValidationError } from 'fyo/utils/errors';
+import { NotFoundError, ValidationError } from 'fyo/utils/errors';
 import {
-  getDocStatus,
+  getDocStatusListColumn,
   getLedgerLinkAction,
-  getStatusMap,
-  statusColor
+  getNumberSeries,
 } from 'models/helpers';
 import { LedgerPosting } from 'models/Transactional/LedgerPosting';
 import { Transactional } from 'models/Transactional/Transactional';
 import { ModelNameEnum } from 'models/types';
 import { Money } from 'pesa';
+import { QueryFilter } from 'utils/db/types';
+import { AccountTypeEnum } from '../Account/types';
 import { Invoice } from '../Invoice/Invoice';
 import { Party } from '../Party/Party';
 import { PaymentFor } from '../PaymentFor/PaymentFor';
 import { PaymentMethod, PaymentType } from './types';
+
+type AccountTypeMap = Record<AccountTypeEnum, string[] | undefined>;
 
 export class Payment extends Transactional {
   party?: string;
   amount?: Money;
   writeoff?: Money;
   paymentType?: PaymentType;
+  for?: PaymentFor[];
+  _accountsMap?: AccountTypeMap;
 
   async change({ changed }: ChangeArg) {
     if (changed === 'for') {
@@ -100,10 +105,40 @@ export class Payment extends Transactional {
       return;
     }
 
+    await this.validateFor();
     this.validateAccounts();
     this.validateTotalReferenceAmount();
-    this.validateWriteOffAccount();
     await this.validateReferences();
+  }
+
+  async validateFor() {
+    for (const childDoc of this.for ?? []) {
+      const referenceName = childDoc.referenceName;
+      const referenceType = childDoc.referenceType;
+
+      const refDoc = (await this.fyo.doc.getDoc(
+        childDoc.referenceType!,
+        childDoc.referenceName
+      )) as Invoice;
+
+      if (referenceName && referenceType && !refDoc) {
+        throw new ValidationError(
+          t`${referenceType} of type ${this.fyo.schemaMap?.[referenceType]
+            ?.label!} does not exist`
+        );
+      }
+
+      if (!refDoc) {
+        continue;
+      }
+
+      if (refDoc?.party !== this.party) {
+        throw new ValidationError(
+          t`${refDoc.name!} party ${refDoc.party!} is different from ${this
+            .party!}`
+        );
+      }
+    }
   }
 
   validateAccounts() {
@@ -154,17 +189,36 @@ export class Payment extends Transactional {
     );
   }
 
-  validateWriteOffAccount() {
+  async validateWriteOffAccount() {
     if ((this.writeoff as Money).isZero()) {
       return;
     }
 
-    if (!this.fyo.singles.AccountingSettings!.writeOffAccount) {
-      throw new ValidationError(
-        this.fyo.t`Write Off Account not set.
-          Please set Write Off Account in General Settings`
+    const writeOffAccount = this.fyo.singles.AccountingSettings!
+      .writeOffAccount as string | null | undefined;
+
+    if (!writeOffAccount) {
+      throw new NotFoundError(
+        t`Write Off Account not set.
+          Please set Write Off Account in General Settings`,
+        false
       );
     }
+
+    const exists = await this.fyo.db.exists(
+      ModelNameEnum.Account,
+      writeOffAccount
+    );
+
+    if (exists) {
+      return;
+    }
+
+    throw new NotFoundError(
+      t`Write Off Account ${writeOffAccount} does not exist.
+          Please set Write Off Account in General Settings`,
+      false
+    );
   }
 
   async getPosting() {
@@ -180,6 +234,7 @@ export class Payment extends Transactional {
      * -        account : Cash, Bank, etc
      * - paymentAccount : Creditors, etc
      */
+    await this.validateWriteOffAccount();
     const posting: LedgerPosting = new LedgerPosting(this, this.fyo);
 
     const paymentAccount = this.paymentAccount as string;
@@ -221,8 +276,9 @@ export class Payment extends Transactional {
 
     for (const row of forReferences) {
       this.validateReferenceType(row);
-      await this.validateReferenceOutstanding(row);
     }
+
+    await this.validateReferenceOutstanding();
   }
 
   validateReferenceType(row: PaymentFor) {
@@ -236,13 +292,19 @@ export class Payment extends Transactional {
     }
   }
 
-  async validateReferenceOutstanding(row: PaymentFor) {
-    const referenceDoc = await this.fyo.doc.getDoc(
-      row.referenceType as string,
-      row.referenceName as string
-    );
+  async validateReferenceOutstanding() {
+    let outstandingAmount = this.fyo.pesa(0);
+    for (const row of this.for ?? []) {
+      const referenceDoc = (await this.fyo.doc.getDoc(
+        row.referenceType as string,
+        row.referenceName as string
+      )) as Invoice;
 
-    const outstandingAmount = referenceDoc.outstandingAmount as Money;
+      outstandingAmount = outstandingAmount.add(
+        referenceDoc.outstandingAmount ?? 0
+      );
+    }
+
     const amount = this.amount as Money;
 
     if (amount.gt(0) && amount.lte(outstandingAmount)) {
@@ -279,7 +341,7 @@ export class Payment extends Transactional {
       );
 
       const previousOutstandingAmount = referenceDoc.outstandingAmount as Money;
-      const outstandingAmount = previousOutstandingAmount.sub(this.amount!);
+      const outstandingAmount = previousOutstandingAmount.sub(row.amount!);
       await referenceDoc.setAndSync({ outstandingAmount });
     }
   }
@@ -317,34 +379,123 @@ export class Payment extends Transactional {
     await partyDoc.updateOutstandingAmount();
   }
 
-  static defaults: DefaultMap = { date: () => new Date().toISOString() };
+  static defaults: DefaultMap = {
+    numberSeries: (doc) => getNumberSeries(doc.schemaName, doc.fyo),
+    date: () => new Date(),
+  };
+
+  async _getAccountsMap(): Promise<AccountTypeMap> {
+    if (this._accountsMap) {
+      return this._accountsMap;
+    }
+
+    const accounts = (await this.fyo.db.getAll(ModelNameEnum.Account, {
+      fields: ['name', 'accountType'],
+      filters: {
+        accountType: [
+          'in',
+          [
+            AccountTypeEnum.Bank,
+            AccountTypeEnum.Cash,
+            AccountTypeEnum.Payable,
+            AccountTypeEnum.Receivable,
+          ],
+        ],
+      },
+    })) as { name: string; accountType: AccountTypeEnum }[];
+
+    return (this._accountsMap = accounts.reduce((acc, ac) => {
+      acc[ac.accountType] ??= [];
+      acc[ac.accountType]!.push(ac.name);
+      return acc;
+    }, {} as AccountTypeMap));
+  }
+
+  async _getReferenceAccount() {
+    const account = await this._getAccountFromParty();
+    if (!account) {
+      return await this._getAccountFromFor();
+    }
+
+    return account;
+  }
+
+  async _getAccountFromParty() {
+    const party = (await this.loadAndGetLink('party')) as Party | null;
+    if (!party || party.role === 'Both') {
+      return null;
+    }
+
+    return party.defaultAccount ?? null;
+  }
+
+  async _getAccountFromFor() {
+    const reference = this?.for?.[0];
+    if (!reference) {
+      return null;
+    }
+
+    const refDoc = (await reference.loadAndGetLink(
+      'referenceName'
+    )) as Invoice | null;
+
+    return (refDoc?.account ?? null) as string | null;
+  }
 
   formulas: FormulaMap = {
     account: {
       formula: async () => {
-        if (this.paymentMethod === 'Cash' && this.paymentType === 'Pay') {
-          return 'Cash';
+        const accountsMap = await this._getAccountsMap();
+        if (this.paymentType === 'Receive') {
+          return (
+            (await this._getReferenceAccount()) ??
+            accountsMap[AccountTypeEnum.Receivable]?.[0] ??
+            null
+          );
         }
+
+        if (this.paymentMethod === 'Cash') {
+          return accountsMap[AccountTypeEnum.Cash]?.[0] ?? null;
+        }
+
+        if (this.paymentMethod !== 'Cash') {
+          return accountsMap[AccountTypeEnum.Bank]?.[0] ?? null;
+        }
+
+        return null;
       },
-      dependsOn: ['paymentMethod', 'paymentType'],
+      dependsOn: ['paymentMethod', 'paymentType', 'party'],
     },
     paymentAccount: {
       formula: async () => {
-        if (this.paymentMethod === 'Cash' && this.paymentType === 'Receive') {
-          return 'Cash';
+        const accountsMap = await this._getAccountsMap();
+        if (this.paymentType === 'Pay') {
+          return (
+            (await this._getReferenceAccount()) ??
+            accountsMap[AccountTypeEnum.Payable]?.[0] ??
+            null
+          );
         }
+
+        if (this.paymentMethod === 'Cash') {
+          return accountsMap[AccountTypeEnum.Cash]?.[0] ?? null;
+        }
+
+        if (this.paymentMethod !== 'Cash') {
+          return accountsMap[AccountTypeEnum.Bank]?.[0] ?? null;
+        }
+
+        return null;
       },
-      dependsOn: ['paymentMethod', 'paymentType'],
+      dependsOn: ['paymentMethod', 'paymentType', 'party'],
     },
     paymentType: {
       formula: async () => {
         if (!this.party) {
           return;
         }
-        const partyDoc = await this.fyo.doc.getDoc(
-          ModelNameEnum.Party,
-          this.party
-        );
+
+        const partyDoc = (await this.loadAndGetLink('party')) as Party;
         if (partyDoc.role === 'Supplier') {
           return 'Pay';
         } else if (partyDoc.role === 'Customer') {
@@ -353,7 +504,7 @@ export class Payment extends Transactional {
 
         const outstanding = partyDoc.outstandingAmount as Money;
         if (outstanding?.isZero() ?? true) {
-          return '';
+          return this.paymentType;
         }
 
         if (outstanding?.isPositive()) {
@@ -409,9 +560,24 @@ export class Payment extends Transactional {
     referenceId: () => this.paymentMethod === 'Cash',
     clearanceDate: () => this.paymentMethod === 'Cash',
     amountPaid: () => this.writeoff?.isZero() ?? true,
+    attachment: () =>
+      !(this.attachment || !(this.isSubmitted || this.isCancelled)),
+    for: () => !!((this.isSubmitted || this.isCancelled) && !this.for?.length),
   };
 
   static filters: FiltersMap = {
+    party: (doc: Doc) => {
+      const paymentType = (doc as Payment).paymentType;
+      if (paymentType === 'Pay') {
+        return { role: ['in', ['Supplier', 'Both']] } as QueryFilter;
+      }
+
+      if (paymentType === 'Receive') {
+        return { role: ['in', ['Customer', 'Both']] } as QueryFilter;
+      }
+
+      return {};
+    },
     numberSeries: () => {
       return { referenceType: 'Payment' };
     },
@@ -451,27 +617,8 @@ export class Payment extends Transactional {
 
   static getListViewSettings(fyo: Fyo): ListViewSettings {
     return {
-      columns: [
-        'name',
-        {
-          label: t`Status`,
-          fieldname: 'status',
-          fieldtype: 'Select',
-          size: 'small',
-          render(doc) {
-            const status = getDocStatus(doc);
-            const color = statusColor[status] ?? 'gray';
-            const label = getStatusMap()[status];
-
-            return {
-              template: `<Badge class="text-xs" color="${color}">${label}</Badge>`,
-            };
-          },
-        },
-        'party',
-        'date',
-        'amount',
-      ],
+      formRoute: (name) => `/edit/Payment/${name}`,
+      columns: ['name', getDocStatusListColumn(), 'party', 'date', 'amount'],
     };
   }
 }

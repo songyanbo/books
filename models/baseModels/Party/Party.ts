@@ -15,6 +15,8 @@ import { Money } from 'pesa';
 import { PartyRole } from './types';
 
 export class Party extends Doc {
+  role?: PartyRole;
+  defaultAccount?: string;
   outstandingAmount?: Money;
   async updateOutstandingAmount() {
     /**
@@ -87,7 +89,11 @@ export class Party extends Doc {
       dependsOn: ['role'],
     },
     currency: {
-      formula: async () => this.fyo.singles.SystemSettings!.currency as string,
+      formula: async () => {
+        if (!this.currency) {
+          return this.fyo.singles.SystemSettings!.currency as string;
+        }
+      },
     },
   };
 
@@ -147,7 +153,10 @@ export class Party extends Doc {
         condition: (doc: Doc) =>
           !doc.notInserted && (doc.role as PartyRole) !== 'Customer',
         action: async (partyDoc, router) => {
-          router.push(`/list/PurchaseInvoice/party/${partyDoc.name}`);
+          await router.push({
+            path: '/list/PurchaseInvoice',
+            query: { filters: JSON.stringify({ party: partyDoc.name }) },
+          });
         },
       },
       {
@@ -155,11 +164,12 @@ export class Party extends Doc {
         condition: (doc: Doc) =>
           !doc.notInserted && (doc.role as PartyRole) !== 'Supplier',
         action: async (partyDoc, router) => {
-          const doc = await fyo.doc.getNewDoc('SalesInvoice', {
+          const doc = fyo.doc.getNewDoc('SalesInvoice', {
             party: partyDoc.name,
             account: partyDoc.defaultAccount as string,
           });
-          router.push({
+
+          await router.push({
             path: `/edit/SalesInvoice/${doc.name}`,
             query: {
               schemaName: 'SalesInvoice',
@@ -176,7 +186,10 @@ export class Party extends Doc {
         condition: (doc: Doc) =>
           !doc.notInserted && (doc.role as PartyRole) !== 'Supplier',
         action: async (partyDoc, router) => {
-          router.push(`/list/SalesInvoice/party/${partyDoc.name}`);
+          router.push({
+            path: '/list/SalesInvoice',
+            query: { filters: JSON.stringify({ party: partyDoc.name }) },
+          });
         },
       },
     ];

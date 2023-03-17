@@ -6,8 +6,23 @@ import { t } from 'fyo';
 import { BaseError } from 'fyo/utils/errors';
 import { BackendResponse } from 'utils/ipc/types';
 import { IPC_ACTIONS, IPC_MESSAGES } from 'utils/messages';
+import { SelectFileOptions, SelectFileReturn, TemplateFile } from 'utils/types';
 import { setLanguageMap } from './language';
 import { showMessageDialog, showToast } from './ui';
+
+export function reloadWindow() {
+  return ipcRenderer.send(IPC_MESSAGES.RELOAD_MAIN_WINDOW);
+}
+
+export async function getTemplates(): Promise<TemplateFile[]> {
+  return await ipcRenderer.invoke(IPC_ACTIONS.GET_TEMPLATES);
+}
+
+export async function selectFile(
+  options: SelectFileOptions
+): Promise<SelectFileReturn> {
+  return await ipcRenderer.invoke(IPC_ACTIONS.SELECT_FILE, options);
+}
 
 export async function checkForUpdates() {
   await ipcRenderer.invoke(IPC_ACTIONS.CHECK_FOR_UPDATES);

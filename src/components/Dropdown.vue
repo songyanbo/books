@@ -15,8 +15,8 @@
       </div>
     </template>
     <template #content>
-      <div class="bg-white rounded w-full min-w-40">
-        <div class="p-1 max-h-64 overflow-auto text-sm">
+      <div class="bg-white rounded w-full min-w-40 overflow-hidden">
+        <div class="p-1 max-h-64 overflow-auto custom-scroll text-sm">
           <div v-if="isLoading" class="p-2 text-gray-600 italic">
             {{ t`Loading...` }}
           </div>
@@ -141,11 +141,21 @@ export default {
 
         let items = [];
         let i = 0;
+
+        const noGroupItems = itemsByGroup[''];
+        if (noGroupItems?.length) {
+          items = items.concat(
+            noGroupItems.map((d) => {
+              d.index = i++;
+              return d;
+            })
+          );
+        }
+
         for (let group of this.sortedGroups) {
           let groupItems = itemsByGroup[group];
           groupItems = groupItems.map((d) => {
-            d.index = i;
-            i++;
+            d.index = i++;
             return d;
           });
           items = items.concat(
@@ -214,23 +224,24 @@ export default {
         await this.selectItem(this.items[0]);
       }
     },
-    highlightItemUp() {
+    highlightItemUp(e) {
+      e?.preventDefault();
+
       this.highlightedIndex -= 1;
       if (this.highlightedIndex < 0) {
         this.highlightedIndex = 0;
       }
+
       nextTick(() => {
-        let index = this.highlightedIndex;
-        if (index !== 0) {
-          index -= 1;
-        }
         this.scrollToHighlighted();
       });
     },
-    highlightItemDown() {
+    highlightItemDown(e) {
+      e?.preventDefault();
+
       this.highlightedIndex += 1;
-      if (this.highlightedIndex > this.items.length) {
-        this.highlightedIndex = this.items.length;
+      if (this.highlightedIndex >= this.items.length) {
+        this.highlightedIndex = this.items.length - 1;
       }
 
       nextTick(() => {

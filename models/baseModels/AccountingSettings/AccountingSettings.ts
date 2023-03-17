@@ -2,9 +2,10 @@ import { Doc } from 'fyo/model/doc';
 import {
   ChangeArg,
   FiltersMap,
+  HiddenMap,
   ListsMap,
   ReadOnlyMap,
-  ValidationMap
+  ValidationMap,
 } from 'fyo/model/types';
 import { validateEmail } from 'fyo/model/validationFunction';
 import { createDiscountAccount } from 'src/setup/setupInstance';
@@ -12,6 +13,8 @@ import { getCountryInfo } from 'utils/misc';
 
 export class AccountingSettings extends Doc {
   enableDiscounting?: boolean;
+  enableInventory?: boolean;
+
   static filters: FiltersMap = {
     writeOffAccount: () => ({
       isGroup: false,
@@ -39,6 +42,14 @@ export class AccountingSettings extends Doc {
     enableDiscounting: () => {
       return !!this.enableDiscounting;
     },
+    enableInventory: () => {
+      return !!this.enableInventory;
+    },
+  };
+
+  override hidden: HiddenMap = {
+    discountAccount: () => !this.enableDiscounting,
+    gstin: () => this.fyo.singles.SystemSettings?.countryCode !== 'in',
   };
 
   async change(ch: ChangeArg) {

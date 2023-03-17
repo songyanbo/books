@@ -1,12 +1,12 @@
 import { Fyo } from 'fyo';
 import { Converter } from 'fyo/core/converter';
-import { DocValue, DocValueMap } from 'fyo/core/types';
+import { DocValue, DocValueMap, RawValueMap } from 'fyo/core/types';
 import { Verb } from 'fyo/telemetry/types';
 import { DEFAULT_USER } from 'fyo/utils/consts';
 import { ConflictError, MandatoryError, NotFoundError } from 'fyo/utils/errors';
 import Observable from 'fyo/utils/observable';
-import { Money } from 'pesa';
 import {
+  DynamicLinkField,
   Field,
   FieldTypeEnum,
   OptionField,
@@ -60,12 +60,17 @@ export class Doc extends Observable<DocValue | Doc[]> {
   parentFieldname?: string;
   parentSchemaName?: string;
 
-  _links?: Record<string, Doc>;
+  links?: Record<string, Doc>;
   _dirty: boolean = true;
   _notInserted: boolean = true;
 
   _syncing = false;
-  constructor(schema: Schema, data: DocValueMap, fyo: Fyo) {
+  constructor(
+    schema: Schema,
+    data: DocValueMap,
+    fyo: Fyo,
+    convertToDocValue: boolean = true
+  ) {
     super();
     this.fyo = markRaw(fyo);
     this.schema = schema;
@@ -76,7 +81,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
 
     this._setDefaults();
-    this._setValuesWithoutChecks(data);
+    this._setValuesWithoutChecks(data, convertToDocValue);
   }
 
   get schemaName(): string {
@@ -123,7 +128,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
     return !!this.submitted && !!this.cancelled;
   }
 
-  get syncing() {
+  get isSyncing() {
     return this._syncing;
   }
 
@@ -133,6 +138,10 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
 
     if (this.schema.isSingle) {
+      return false;
+    }
+
+    if (this.schema.isChild) {
       return false;
     }
 
@@ -151,15 +160,107 @@ export class Doc extends Observable<DocValue | Doc[]> {
     return false;
   }
 
-  _setValuesWithoutChecks(data: DocValueMap) {
+  get canEdit() {
+    if (!this.schema.isSubmittable) {
+      return true;
+    }
+
+    if (this.submitted) {
+      return false;
+    }
+
+    if (this.cancelled) {
+      return false;
+    }
+
+    return true;
+  }
+
+  get canSave() {
+    const isSubmittable = this.schema.isSubmittable;
+    if (isSubmittable && !!this.submitted) {
+      return false;
+    }
+
+    if (isSubmittable && !!this.cancelled) {
+      return false;
+    }
+
+    if (!this.dirty) {
+      return false;
+    }
+
+    if (this.schema.isChild) {
+      return false;
+    }
+
+    return true;
+  }
+
+  get canSubmit() {
+    if (!this.schema.isSubmittable) {
+      return false;
+    }
+
+    if (this.dirty) {
+      return false;
+    }
+
+    if (this.notInserted) {
+      return false;
+    }
+
+    if (!!this.submitted) {
+      return false;
+    }
+
+    if (!!this.cancelled) {
+      return false;
+    }
+
+    return true;
+  }
+
+  get canCancel() {
+    if (!this.schema.isSubmittable) {
+      return false;
+    }
+
+    if (this.dirty) {
+      return false;
+    }
+
+    if (this.notInserted) {
+      return false;
+    }
+
+    if (!!this.cancelled) {
+      return false;
+    }
+
+    if (!this.submitted) {
+      return false;
+    }
+
+    return true;
+  }
+
+  _setValuesWithoutChecks(data: DocValueMap, convertToDocValue: boolean) {
     for (const field of this.schema.fields) {
-      const fieldname = field.fieldname;
+      const { fieldname, fieldtype } = field;
       const value = data[field.fieldname];
 
       if (Array.isArray(value)) {
         for (const row of value) {
-          this.push(fieldname, row);
+          this.push(fieldname, row, convertToDocValue);
         }
+      } else if (
+        fieldtype === FieldTypeEnum.Currency &&
+        typeof value === 'number'
+      ) {
+        this[fieldname] = this.fyo.pesa(value);
+      } else if (value !== undefined && !convertToDocValue) {
+        this[fieldname] = value;
       } else if (value !== undefined) {
         this[fieldname] = Converter.toDocValue(
           value as RawValue,
@@ -186,7 +287,8 @@ export class Doc extends Observable<DocValue | Doc[]> {
   // set value and trigger change
   async set(
     fieldname: string | DocValueMap,
-    value?: DocValue | Doc[] | DocValueMap[]
+    value?: DocValue | Doc[] | DocValueMap[],
+    retriggerChildDocApplyChange: boolean = false
   ): Promise<boolean> {
     if (typeof fieldname === 'object') {
       return await this.setMultiple(fieldname as DocValueMap);
@@ -216,7 +318,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
       await this._applyChange(fieldname);
       await this.parentdoc._applyChange(this.parentFieldname as string);
     } else {
-      await this._applyChange(fieldname);
+      await this._applyChange(fieldname, retriggerChildDocApplyChange);
     }
 
     return true;
@@ -259,11 +361,14 @@ export class Doc extends Observable<DocValue | Doc[]> {
     return !areDocValuesEqual(currentValue as DocValue, value as DocValue);
   }
 
-  async _applyChange(fieldname: string): Promise<boolean> {
-    await this._applyFormula(fieldname);
+  async _applyChange(
+    changedFieldname: string,
+    retriggerChildDocApplyChange?: boolean
+  ): Promise<boolean> {
+    await this._applyFormula(changedFieldname, retriggerChildDocApplyChange);
     await this.trigger('change', {
       doc: this,
-      changed: fieldname,
+      changed: changedFieldname,
     });
 
     return true;
@@ -279,7 +384,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
       const defaultFunction =
         this.fyo.models[this.schemaName]?.defaults?.[field.fieldname];
       if (defaultFunction !== undefined) {
-        defaultValue = defaultFunction();
+        defaultValue = defaultFunction(this);
       } else if (field.default !== undefined) {
         defaultValue = field.default;
       }
@@ -291,6 +396,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
       this[field.fieldname] = defaultValue;
     }
   }
+
   async remove(fieldname: string, idx: number) {
     const childDocs = ((this[fieldname] ?? []) as Doc[]).filter(
       (row, i) => row.idx !== idx || i !== idx
@@ -308,19 +414,44 @@ export class Doc extends Observable<DocValue | Doc[]> {
     return await this._applyChange(fieldname);
   }
 
-  push(fieldname: string, docValueMap: Doc | DocValueMap = {}) {
+  push(
+    fieldname: string,
+    docValueMap: Doc | DocValueMap | RawValueMap = {},
+    convertToDocValue: boolean = false
+  ) {
     const childDocs = [
       (this[fieldname] ?? []) as Doc[],
-      this._getChildDoc(docValueMap, fieldname),
+      this._getChildDoc(docValueMap, fieldname, convertToDocValue),
     ].flat();
 
     setChildDocIdx(childDocs);
     this[fieldname] = childDocs;
   }
 
-  _getChildDoc(docValueMap: Doc | DocValueMap, fieldname: string): Doc {
-    if (!this.name) {
-      this.name = getRandomString();
+  _setChildDocsParent() {
+    for (const { fieldname } of this.tableFields) {
+      const value = this.get(fieldname);
+      if (!Array.isArray(value)) {
+        continue;
+      }
+
+      for (const childDoc of value) {
+        if (childDoc.parent) {
+          continue;
+        }
+
+        childDoc.parent = this.name;
+      }
+    }
+  }
+
+  _getChildDoc(
+    docValueMap: Doc | DocValueMap | RawValueMap,
+    fieldname: string,
+    convertToDocValue: boolean = false
+  ): Doc {
+    if (!this.name && this.schema.naming !== 'manual') {
+      this.name = this.fyo.doc.getTemporaryName(this.schema);
     }
 
     docValueMap.name ??= getRandomString();
@@ -339,7 +470,10 @@ export class Doc extends Observable<DocValue | Doc[]> {
     const childDoc = this.fyo.doc.getNewDoc(
       childSchemaName,
       docValueMap,
-      false
+      false,
+      undefined,
+      undefined,
+      convertToDocValue
     );
     childDoc.parentdoc = this;
     return childDoc;
@@ -433,7 +567,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
       }
 
       if (isPesa(value)) {
-        value = (value as Money).copy();
+        value = value.copy();
       }
 
       if (value === null && this.schema.isSingle) {
@@ -490,46 +624,72 @@ export class Doc extends Observable<DocValue | Doc[]> {
   }
 
   async loadLinks() {
-    this._links = {};
+    this.links ??= {};
     const linkFields = this.schema.fields.filter(
-      (f) => f.fieldtype === FieldTypeEnum.Link || f.inline
+      ({ fieldtype }) =>
+        fieldtype === FieldTypeEnum.Link ||
+        fieldtype === FieldTypeEnum.DynamicLink
     );
 
-    for (const f of linkFields) {
-      await this.loadLink(f.fieldname);
+    for (const field of linkFields) {
+      await this._loadLink(field);
     }
   }
 
-  async loadLink(fieldname: string) {
-    this._links ??= {};
-    const field = this.fieldMap[fieldname] as TargetField;
-    if (field === undefined) {
+  async _loadLink(field: Field) {
+    if (field.fieldtype === FieldTypeEnum.Link) {
+      return await this._loadLinkField(field as TargetField);
+    }
+
+    if (field.fieldtype === FieldTypeEnum.DynamicLink) {
+      return await this._loadDynamicLinkField(field as DynamicLinkField);
+    }
+  }
+
+  async _loadLinkField(field: TargetField) {
+    const { fieldname, target } = field;
+    const value = this.get(fieldname) as string | undefined;
+    if (!value || !target) {
       return;
     }
 
-    const value = this.get(fieldname);
-    if (getIsNullOrUndef(value) || field.target === undefined) {
+    await this._loadLinkDoc(fieldname, target, value);
+  }
+
+  async _loadDynamicLinkField(field: DynamicLinkField) {
+    const { fieldname, references } = field;
+    const value = this.get(fieldname) as string | undefined;
+    const reference = this.get(references) as string | undefined;
+    if (!value || !reference) {
       return;
     }
 
-    this._links[fieldname] = await this.fyo.doc.getDoc(
-      field.target,
-      value as string
-    );
+    await this._loadLinkDoc(fieldname, reference, value);
+  }
+
+  async _loadLinkDoc(fieldname: string, schemaName: string, name: string) {
+    this.links![fieldname] = await this.fyo.doc.getDoc(schemaName, name);
   }
 
   getLink(fieldname: string): Doc | null {
-    const link = this._links?.[fieldname];
-    if (link === undefined) {
+    return this.links?.[fieldname] ?? null;
+  }
+
+  async loadAndGetLink(fieldname: string): Promise<Doc | null> {
+    if (!this?.[fieldname]) {
       return null;
     }
 
-    return link;
+    if (this.links?.[fieldname]?.name !== this[fieldname]) {
+      await this.loadLinks();
+    }
+
+    return this.links?.[fieldname] ?? null;
   }
 
   async _syncValues(data: DocValueMap) {
     this._clearValues();
-    this._setValuesWithoutChecks(data);
+    this._setValuesWithoutChecks(data, false);
     await this._setComputedValuesFromFormulas();
     this._dirty = false;
     this.trigger('change', {
@@ -598,37 +758,63 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
   }
 
-  async _applyFormula(fieldname?: string): Promise<boolean> {
+  async _applyFormula(
+    changedFieldname?: string,
+    retriggerChildDocApplyChange?: boolean
+  ): Promise<boolean> {
     const doc = this;
-    let changed = false;
+    let changed = await this._callAllTableFieldsApplyFormula(changedFieldname);
+    changed =
+      (await this._applyFormulaForFields(doc, changedFieldname)) || changed;
 
-    const childDocs = this.tableFields
-      .map((f) => (this.get(f.fieldname) as Doc[]) ?? [])
-      .flat();
-
-    // children
-    for (const row of childDocs) {
-      changed ||= (await row?._applyFormula()) ?? false;
+    if (changed && retriggerChildDocApplyChange) {
+      await this._callAllTableFieldsApplyFormula(changedFieldname);
+      await this._applyFormulaForFields(doc, changedFieldname);
     }
 
-    // parent or child row
-    const formulaFields = Object.keys(this.formulas).map(
-      (fn) => this.fieldMap[fn]
-    );
-
-    changed ||= await this._applyFormulaForFields(
-      formulaFields,
-      doc,
-      fieldname
-    );
     return changed;
   }
 
-  async _applyFormulaForFields(
-    formulaFields: Field[],
-    doc: Doc,
+  async _callAllTableFieldsApplyFormula(
+    changedFieldname?: string
+  ): Promise<boolean> {
+    let changed = false;
+
+    for (const { fieldname } of this.tableFields) {
+      const childDocs = this.get(fieldname) as Doc[];
+      if (!childDocs) {
+        continue;
+      }
+
+      changed =
+        (await this._callChildDocApplyFormula(childDocs, changedFieldname)) ||
+        changed;
+    }
+
+    return changed;
+  }
+
+  async _callChildDocApplyFormula(
+    childDocs: Doc[],
     fieldname?: string
-  ) {
+  ): Promise<boolean> {
+    let changed: boolean = false;
+    for (const childDoc of childDocs) {
+      if (!childDoc._applyFormula) {
+        continue;
+      }
+
+      changed = (await childDoc._applyFormula(fieldname)) || changed;
+    }
+
+    return changed;
+  }
+
+  async _applyFormulaForFields(doc: Doc, fieldname?: string) {
+    const formulaFields = this.schema.fields.filter(
+      ({ fieldname }) => this.formulas?.[fieldname]
+    );
+
     let changed = false;
     for (const field of formulaFields) {
       const shouldApply = shouldApplyFormula(field, doc, fieldname);
@@ -644,7 +830,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
       }
 
       doc[field.fieldname] = newVal;
-      changed = true;
+      changed ||= true;
     }
 
     return changed;
@@ -672,15 +858,16 @@ export class Doc extends Observable<DocValue | Doc[]> {
 
   async _preSync() {
     this._setChildDocsIdx();
+    this._setChildDocsParent();
     await this._applyFormula();
     await this._validateSync();
     await this.trigger('validate');
   }
 
   async _insert() {
-    await setName(this, this.fyo);
     this._setBaseMetaValues();
     await this._preSync();
+    await setName(this, this.fyo);
 
     const validDict = this.getValidDict(false, true);
     let data: DocValueMap;
@@ -759,6 +946,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
 
     await this.trigger('beforeCancel');
+    await this.trigger('beforeCancel');
     await this.setAndSync('cancelled', true);
     await this.trigger('afterCancel');
 
@@ -802,13 +990,15 @@ export class Doc extends Observable<DocValue | Doc[]> {
             throw err;
           }
         }
-        return value as Money;
+
+        return value;
       })
       .reduce((a, b) => a.add(b), this.fyo.pesa(0));
 
     if (convertToFloat) {
       return sum.float;
     }
+
     return sum;
   }
 
@@ -836,7 +1026,12 @@ export class Doc extends Observable<DocValue | Doc[]> {
       updateMap.name = updateMap.name + ' CPY';
     }
 
-    return this.fyo.doc.getNewDoc(this.schemaName, updateMap);
+    const rawUpdateMap = this.fyo.db.converter.toRawValueMap(
+      this.schemaName,
+      updateMap
+    ) as RawValueMap;
+
+    return this.fyo.doc.getNewDoc(this.schemaName, rawUpdateMap, true);
   }
 
   /**

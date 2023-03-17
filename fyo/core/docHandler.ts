@@ -6,7 +6,7 @@ import Observable from 'fyo/utils/observable';
 import { Schema } from 'schemas/types';
 import { getRandomString } from 'utils';
 import { Fyo } from '..';
-import { DocValueMap } from './types';
+import { DocValueMap, RawValueMap } from './types';
 
 export class DocHandler {
   fyo: Fyo;
@@ -14,9 +14,11 @@ export class DocHandler {
   singles: SinglesMap = {};
   docs: Observable<DocMap | undefined> = new Observable();
   observer: Observable<never> = new Observable();
+  #temporaryNameCounters: Record<string, number>;
 
   constructor(fyo: Fyo) {
     this.fyo = fyo;
+    this.#temporaryNameCounters = {};
   }
 
   init() {
@@ -70,7 +72,7 @@ export class DocHandler {
       return doc;
     }
 
-    doc = this.getNewDoc(schemaName, { name });
+    doc = this.getNewDoc(schemaName, { name }, false);
     await doc.load();
     this.#addToCache(doc);
 
@@ -79,10 +81,11 @@ export class DocHandler {
 
   getNewDoc(
     schemaName: string,
-    data: DocValueMap = {},
+    data: DocValueMap | RawValueMap = {},
     cacheDoc: boolean = true,
     schema?: Schema,
-    Model?: typeof Doc
+    Model?: typeof Doc,
+    isRawValueMap: boolean = true
   ): Doc {
     if (!this.models[schemaName] && Model) {
       this.models[schemaName] = Model;
@@ -95,13 +98,29 @@ export class DocHandler {
       throw new NotFoundError(`Schema not found for ${schemaName}`);
     }
 
-    const doc = new Model!(schema, data, this.fyo);
-    doc.name ??= getRandomString();
+    const doc = new Model!(schema, data, this.fyo, isRawValueMap);
+    doc.name ??= this.getTemporaryName(schema);
     if (cacheDoc) {
       this.#addToCache(doc);
     }
 
     return doc;
+  }
+
+  getTemporaryName(schema: Schema): string {
+    if (schema.naming === 'random') {
+      return getRandomString();
+    }
+
+    this.#temporaryNameCounters[schema.name] ??= 1;
+
+    const idx = this.#temporaryNameCounters[schema.name];
+    this.#temporaryNameCounters[schema.name] = idx + 1;
+
+    return this.fyo.t`New ${schema.label ?? schema.name} ${String(idx).padStart(
+      2,
+      '0'
+    )}`;
   }
 
   /**

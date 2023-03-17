@@ -6,58 +6,36 @@
     {
       "fieldname": "logo",
       "label": "Logo",
-      "fieldtype": "AttachImage"
+      "fieldtype": "AttachImage",
+      "section": "Default"
     },
     {
       "fieldname": "companyName",
       "label": "Company Name",
-      "fieldtype": "Data"
+      "fieldtype": "Data",
+      "section": "Default"
     },
     {
       "fieldname": "email",
       "label": "Email",
       "fieldtype": "Data",
-      "placeholder": "john@doe.com"
-    },
-    {
-      "fieldname": "displayLogo",
-      "label": "Display Logo in Invoice",
-      "fieldtype": "Check"
+      "placeholder": "john@doe.com",
+      "section": "Contacts"
     },
     {
       "fieldname": "phone",
       "label": "Phone",
       "fieldtype": "Data",
-      "placeholder": "9888900000"
+      "placeholder": "9888900000",
+      "section": "Contacts"
     },
     {
       "fieldname": "address",
       "label": "Address",
       "fieldtype": "Link",
       "target": "Address",
-      "placeholder": "Click to create",
-      "inline": true
-    },
-    {
-      "fieldname": "template",
-      "label": "Template",
-      "placeholder": "Template",
-      "fieldtype": "Select",
-      "options": [
-        {
-          "value": "Basic",
-          "label": "Basic"
-        },
-        {
-          "value": "Minimal",
-          "label": "Minimal"
-        },
-        {
-          "value": "Business",
-          "label": "Business"
-        }
-      ],
-      "default": "Basic"
+      "create": true,
+      "section": "Contacts"
     },
     {
       "fieldname": "color",
@@ -106,7 +84,8 @@
           "label": "Black",
           "value": "#112B42"
         }
-      ]
+      ],
+      "section": "Customizations"
     },
     {
       "fieldname": "font",
@@ -127,17 +106,14 @@
           "label": "Courier"
         }
       ],
-      "default": "Arial"
+      "default": "Arial",
+      "section": "Customizations"
+    },
+    {
+      "fieldname": "displayLogo",
+      "label": "Display Logo in Invoice",
+      "fieldtype": "Check",
+      "section": "Customizations"
     }
-  ],
-  "quickEditFields": [
-    "logo",
-    "displayLogo",
-    "template",
-    "color",
-    "font",
-    "email",
-    "phone",
-    "address"
   ]
 }

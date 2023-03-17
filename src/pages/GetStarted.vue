@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col overflow-y-hidden">
     <PageHeader :title="t`Set Up Your Workspace`" />
-    <div class="flex-1 overflow-y-auto overflow-x-hidden">
+    <div class="flex-1 overflow-y-auto overflow-x-hidden custom-scroll">
       <div
         class="p-4 border-b"
         v-for="section in sections"
@@ -53,7 +53,7 @@
                 <Button
                   v-if="item.documentation"
                   class="leading-tight"
-                  :class="{ 'ml-4': item.action }"
+                  :class="{ 'ms-4': item.action }"
                   @click="handleDocumentation(item)"
                 >
                   <span class="text-base">
@@ -116,8 +116,8 @@ export default {
       }
 
       switch (key) {
-        case 'Invoice':
-          await this.updateChecks({ invoiceSetup: true });
+        case 'Print':
+          await this.updateChecks({ printSetup: true });
           break;
         case 'General':
           await this.updateChecks({ companySetup: true });

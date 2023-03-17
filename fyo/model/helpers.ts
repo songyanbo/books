@@ -17,7 +17,7 @@ export function areDocValuesEqual(
 
   if (isPesa(dvOne)) {
     try {
-      return (dvOne as Money).eq(dvTwo as string | number);
+      return dvOne.eq(dvTwo as string | number);
     } catch {
       return false;
     }
@@ -105,8 +105,43 @@ export function shouldApplyFormula(field: Field, doc: Doc, fieldname?: string) {
     return true;
   }
 
+  if (doc.isSyncing && dependsOn.length > 0) {
+    return shouldApplyFormulaPreSync(field.fieldname, dependsOn, doc);
+  }
+
   const value = doc.get(field.fieldname);
   return getIsNullOrUndef(value);
+}
+
+function shouldApplyFormulaPreSync(
+  fieldname: string,
+  dependsOn: string[],
+  doc: Doc
+): boolean {
+  if (isDocValueTruthy(doc.get(fieldname))) {
+    return false;
+  }
+
+  for (const d of dependsOn) {
+    const isSet = isDocValueTruthy(doc.get(d));
+    if (isSet) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function isDocValueTruthy(docValue: DocValue | Doc[]) {
+  if (isPesa(docValue)) {
+    return !docValue.isZero();
+  }
+
+  if (Array.isArray(docValue)) {
+    return docValue.length > 0;
+  }
+
+  return !!docValue;
 }
 
 export function setChildDocIdx(childDocs: Doc[]) {

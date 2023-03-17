@@ -1,10 +1,16 @@
 <template>
-  <div>
-    <label class="flex items-center">
-      <div class="mr-3 text-gray-600 text-sm" v-if="showLabel && !labelRight">
+  <div :class="[inputClasses, containerClasses]">
+    <label
+      class="flex items-center"
+      :class="spaceBetween ? 'justify-between' : ''"
+    >
+      <div class="me-3" :class="labelClasses" v-if="showLabel && !labelRight">
         {{ df.label }}
       </div>
-      <div style="width: 14px; height: 14px; overflow: hidden; cursor: pointer">
+      <div
+        style="width: 14px; height: 14px; overflow: hidden"
+        :class="isReadOnly ? 'cursor-default' : 'cursor-pointer'"
+      >
         <svg
           v-if="checked"
           width="14"
@@ -54,14 +60,14 @@
         <input
           ref="input"
           type="checkbox"
-          :class="inputClasses"
           :checked="value"
           :readonly="isReadOnly"
+          :tabindex="isReadOnly ? '-1' : '0'"
           @change="(e) => !isReadOnly && triggerChange(e.target.checked)"
           @focus="(e) => $emit('focus', e)"
         />
       </div>
-      <div class="ml-3 text-gray-600 text-sm" v-if="showLabel && labelRight">
+      <div class="ms-3" :class="labelClasses" v-if="showLabel && labelRight">
         {{ df.label }}
       </div>
     </label>
@@ -75,10 +81,15 @@ export default {
   extends: Base,
   emits: ['focus'],
   props: {
+    spaceBetween: {
+      default: false,
+      type: Boolean,
+    },
     labelRight: {
       default: true,
       type: Boolean,
     },
+    labelClass: String,
   },
   data() {
     return {
@@ -88,8 +99,12 @@ export default {
     };
   },
   computed: {
-    inputClasses() {
-      return this.getInputClassesFromProp([]);
+    labelClasses() {
+      if (this.labelClass) {
+        return this.labelClass;
+      }
+
+      return 'text-gray-600 text-base';
     },
     checked() {
       return this.value;

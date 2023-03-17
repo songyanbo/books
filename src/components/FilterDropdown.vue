@@ -8,7 +8,7 @@
       <Button :icon="true" @click="togglePopover()">
         <span class="flex items-center">
           <Icon name="filter" size="12" class="stroke-current text-gray-700" />
-          <span class="ml-1">
+          <span class="ms-1">
             <template v-if="activeFilterCount > 0">
               {{ filterAppliedMessage }}
             </template>
@@ -56,9 +56,9 @@
                   </span>
                 </div>
                 <FormControl
+                  :border="true"
                   size="small"
                   class="w-24"
-                  input-class="bg-gray-100"
                   :df="{
                     placeholder: t`Field`,
                     fieldname: 'fieldname',
@@ -69,9 +69,9 @@
                   @change="(value) => (filter.fieldname = value)"
                 />
                 <FormControl
+                  :border="true"
                   size="small"
                   class="w-24"
-                  input-class="bg-gray-100"
                   :df="{
                     placeholder: t`Condition`,
                     fieldname: 'condition',
@@ -82,9 +82,9 @@
                   @change="(value) => (filter.condition = value)"
                 />
                 <FormControl
+                  :border="true"
                   size="small"
                   class="w-24"
-                  input-class="bg-gray-100"
                   :df="{
                     placeholder: t`Value`,
                     fieldname: 'value',
@@ -116,7 +116,7 @@
           @click="addNewFilter"
         >
           <feather-icon name="plus" class="w-4 h-4" />
-          <span class="ml-2">{{ t`Add a filter` }}</span>
+          <span class="ms-2">{{ t`Add a filter` }}</span>
         </div>
       </div>
     </template>
@@ -124,9 +124,9 @@
 </template>
 
 <script>
-import { fyo } from 'src/initFyo';
 import { t } from 'fyo';
 import { FieldTypeEnum } from 'schemas/types';
+import { fyo } from 'src/initFyo';
 import { getRandomString } from 'utils';
 import Button from './Button';
 import FormControl from './Controls/FormControl.vue';
@@ -165,7 +165,11 @@ export default {
   methods: {
     getRandomString,
     addNewFilter() {
-      let df = this.fields[0];
+      const df = this.fields[0];
+      if (!df) {
+        return;
+      }
+
       this.addFilter(df.fieldname, 'like', '', false);
     },
     addFilter(fieldname, condition, value, implicit) {

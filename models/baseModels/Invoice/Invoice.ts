@@ -1,13 +1,26 @@
-import { DocValue } from 'fyo/core/types';
+import { Fyo } from 'fyo';
+import { DocValue, DocValueMap } from 'fyo/core/types';
 import { Doc } from 'fyo/model/doc';
-import { DefaultMap, FiltersMap, FormulaMap, HiddenMap } from 'fyo/model/types';
+import {
+  CurrenciesMap,
+  DefaultMap,
+  FiltersMap,
+  FormulaMap,
+  HiddenMap,
+} from 'fyo/model/types';
+import { DEFAULT_CURRENCY } from 'fyo/utils/consts';
 import { ValidationError } from 'fyo/utils/errors';
-import { getExchangeRate } from 'models/helpers';
+import { addItem, getExchangeRate, getNumberSeries } from 'models/helpers';
+import { InventorySettings } from 'models/inventory/InventorySettings';
+import { StockTransfer } from 'models/inventory/StockTransfer';
 import { Transactional } from 'models/Transactional/Transactional';
 import { ModelNameEnum } from 'models/types';
 import { Money } from 'pesa';
-import { getIsNullOrUndef } from 'utils';
+import { FieldTypeEnum, Schema } from 'schemas/types';
+import { getIsNullOrUndef, joinMapLists, safeParseFloat } from 'utils';
+import { Defaults } from '../Defaults/Defaults';
 import { InvoiceItem } from '../InvoiceItem/InvoiceItem';
+import { Item } from '../Item/Item';
 import { Party } from '../Party/Party';
 import { Payment } from '../Payment/Payment';
 import { Tax } from '../Tax/Tax';
@@ -30,6 +43,7 @@ export abstract class Invoice extends Transactional {
   discountAmount?: Money;
   discountPercent?: number;
   discountAfterTax?: boolean;
+  stockNotTransferred?: number;
 
   submitted?: boolean;
   cancelled?: boolean;
@@ -40,6 +54,45 @@ export abstract class Invoice extends Transactional {
 
   get enableDiscounting() {
     return !!this.fyo.singles?.AccountingSettings?.enableDiscounting;
+  }
+
+  get isMultiCurrency() {
+    if (!this.currency) {
+      return false;
+    }
+
+    return this.fyo.singles.SystemSettings!.currency !== this.currency;
+  }
+
+  get companyCurrency() {
+    return this.fyo.singles.SystemSettings?.currency ?? DEFAULT_CURRENCY;
+  }
+
+  get stockTransferSchemaName() {
+    return this.isSales
+      ? ModelNameEnum.Shipment
+      : ModelNameEnum.PurchaseReceipt;
+  }
+
+  get hasLinkedTransfers() {
+    if (!this.submitted) {
+      return false;
+    }
+
+    return this.getStockTransferred() > 0;
+  }
+
+  get hasLinkedPayments() {
+    if (!this.submitted) {
+      return false;
+    }
+
+    return !this.baseGrandTotal?.eq(this.outstandingAmount!);
+  }
+
+  constructor(schema: Schema, data: DocValueMap, fyo: Fyo) {
+    super(schema, data, fyo);
+    this._setGetCurrencies();
   }
 
   async validate() {
@@ -126,10 +179,12 @@ export abstract class Invoice extends Transactional {
     if (this.currency === currency) {
       return 1.0;
     }
-    return await getExchangeRate({
+    const exchangeRate = await getExchangeRate({
       fromCurrency: this.currency!,
       toCurrency: currency as string,
     });
+
+    return safeParseFloat(exchangeRate.toFixed(2));
   }
 
   async getTaxSummary() {
@@ -139,7 +194,6 @@ export abstract class Invoice extends Transactional {
         account: string;
         rate: number;
         amount: Money;
-        baseAmount: Money;
         [key: string]: DocValue;
       }
     > = {};
@@ -157,7 +211,6 @@ export abstract class Invoice extends Transactional {
           account,
           rate,
           amount: this.fyo.pesa(0),
-          baseAmount: this.fyo.pesa(0),
         };
 
         let amount = item.amount!;
@@ -172,9 +225,7 @@ export abstract class Invoice extends Transactional {
 
     return Object.keys(taxes)
       .map((account) => {
-        const tax = taxes[account];
-        tax.baseAmount = tax.amount.mul(this.exchangeRate!);
-        return tax;
+        return taxes[account];
       })
       .filter((tax) => !tax.amount.isZero());
   }
@@ -285,15 +336,28 @@ export abstract class Invoice extends Transactional {
       },
       dependsOn: ['party'],
     },
-    exchangeRate: { formula: async () => await this.getExchangeRate() },
-    netTotal: { formula: async () => this.getSum('items', 'amount', false) },
-    baseNetTotal: {
-      formula: async () => this.netTotal!.mul(this.exchangeRate!),
+    exchangeRate: {
+      formula: async () => {
+        if (
+          this.currency ===
+          (this.fyo.singles.SystemSettings?.currency ?? DEFAULT_CURRENCY)
+        ) {
+          return 1;
+        }
+
+        if (this.exchangeRate && this.exchangeRate !== 1) {
+          return this.exchangeRate;
+        }
+
+        return await this.getExchangeRate();
+      },
     },
+    netTotal: { formula: async () => this.getSum('items', 'amount', false) },
     taxes: { formula: async () => await this.getTaxSummary() },
     grandTotal: { formula: async () => await this.getGrandTotal() },
     baseGrandTotal: {
-      formula: async () => (this.grandTotal as Money).mul(this.exchangeRate!),
+      formula: async () =>
+        (this.grandTotal as Money).mul(this.exchangeRate! ?? 1),
     },
     outstandingAmount: {
       formula: async () => {
@@ -304,7 +368,39 @@ export abstract class Invoice extends Transactional {
         return this.baseGrandTotal!;
       },
     },
+    stockNotTransferred: {
+      formula: async () => {
+        if (this.submitted) {
+          return;
+        }
+
+        return this.getStockNotTransferred();
+      },
+      dependsOn: ['items'],
+    },
   };
+
+  getStockTransferred() {
+    return (this.items ?? []).reduce(
+      (acc, item) =>
+        (item.quantity ?? 0) - (item.stockNotTransferred ?? 0) + acc,
+      0
+    );
+  }
+
+  getTotalQuantity() {
+    return (this.items ?? []).reduce(
+      (acc, item) => acc + (item.quantity ?? 0),
+      0
+    );
+  }
+
+  getStockNotTransferred() {
+    return (this.items ?? []).reduce(
+      (acc, item) => (item.stockNotTransferred ?? 0) + acc,
+      0
+    );
+  }
 
   getItemDiscountedAmounts() {
     let itemDiscountedAmounts = this.fyo.pesa(0);
@@ -326,7 +422,16 @@ export abstract class Invoice extends Transactional {
   };
 
   static defaults: DefaultMap = {
-    date: () => new Date().toISOString().slice(0, 10),
+    numberSeries: (doc) => getNumberSeries(doc.schemaName, doc.fyo),
+    terms: (doc) => {
+      const defaults = doc.fyo.singles.Defaults as Defaults | undefined;
+      if (doc.schemaName === ModelNameEnum.SalesInvoice) {
+        return defaults?.salesInvoiceTerms ?? '';
+      }
+
+      return defaults?.purchaseInvoiceTerms ?? '';
+    },
+    date: () => new Date(),
   };
 
   static filters: FiltersMap = {
@@ -345,4 +450,253 @@ export abstract class Invoice extends Transactional {
       role: doc.isSales ? 'Customer' : 'Supplier',
     }),
   };
+
+  getCurrencies: CurrenciesMap = {
+    baseGrandTotal: () => this.companyCurrency,
+    outstandingAmount: () => this.companyCurrency,
+  };
+  _getCurrency() {
+    if (this.exchangeRate === 1) {
+      return this.companyCurrency;
+    }
+
+    return this.currency ?? DEFAULT_CURRENCY;
+  }
+  _setGetCurrencies() {
+    const currencyFields = this.schema.fields.filter(
+      ({ fieldtype }) => fieldtype === FieldTypeEnum.Currency
+    );
+
+    for (const { fieldname } of currencyFields) {
+      this.getCurrencies[fieldname] ??= this._getCurrency.bind(this);
+    }
+  }
+
+  getPayment(): Payment | null {
+    if (!this.isSubmitted) {
+      return null;
+    }
+
+    const outstandingAmount = this.outstandingAmount;
+    if (!outstandingAmount) {
+      return null;
+    }
+
+    if (this.outstandingAmount?.isZero()) {
+      return null;
+    }
+
+    const accountField = this.isSales ? 'account' : 'paymentAccount';
+    const data = {
+      party: this.party,
+      date: new Date().toISOString().slice(0, 10),
+      paymentType: this.isSales ? 'Receive' : 'Pay',
+      amount: this.outstandingAmount,
+      [accountField]: this.account,
+      for: [
+        {
+          referenceType: this.schemaName,
+          referenceName: this.name,
+          amount: this.outstandingAmount,
+        },
+      ],
+    };
+
+    return this.fyo.doc.getNewDoc(ModelNameEnum.Payment, data) as Payment;
+  }
+
+  async getStockTransfer(): Promise<StockTransfer | null> {
+    if (!this.isSubmitted) {
+      return null;
+    }
+
+    if (!this.stockNotTransferred) {
+      return null;
+    }
+
+    const schemaName = this.stockTransferSchemaName;
+
+    const defaults = (this.fyo.singles.Defaults as Defaults) ?? {};
+    let terms;
+    if (this.isSales) {
+      terms = defaults.shipmentTerms ?? '';
+    } else {
+      terms = defaults.purchaseReceiptTerms ?? '';
+    }
+
+    const data = {
+      party: this.party,
+      date: new Date().toISOString(),
+      terms,
+      backReference: this.name,
+    };
+
+    const location =
+      (this.fyo.singles.InventorySettings as InventorySettings)
+        .defaultLocation ?? null;
+
+    const transfer = this.fyo.doc.getNewDoc(schemaName, data) as StockTransfer;
+    for (const row of this.items ?? []) {
+      if (!row.item) {
+        continue;
+      }
+
+      const itemDoc = (await row.loadAndGetLink('item')) as Item;
+      const item = row.item;
+      const quantity = row.stockNotTransferred;
+      const trackItem = itemDoc.trackItem;
+      const batch = row.batch || null;
+      let rate = row.rate as Money;
+
+      if (this.exchangeRate && this.exchangeRate > 1) {
+        rate = rate.mul(this.exchangeRate);
+      }
+
+      if (!quantity || !trackItem) {
+        continue;
+      }
+
+      await transfer.append('items', {
+        item,
+        quantity,
+        location,
+        rate,
+        batch,
+      });
+    }
+
+    if (!transfer.items?.length) {
+      return null;
+    }
+
+    return transfer;
+  }
+
+  async beforeCancel(): Promise<void> {
+    await super.beforeCancel();
+    await this._validateStockTransferCancelled();
+  }
+
+  async beforeDelete(): Promise<void> {
+    await super.beforeCancel();
+    await this._validateStockTransferCancelled();
+    await this._deleteCancelledStockTransfers();
+  }
+
+  async _deleteCancelledStockTransfers() {
+    const schemaName = this.stockTransferSchemaName;
+    const transfers = await this._getLinkedStockTransferNames(true);
+
+    for (const { name } of transfers) {
+      const st = await this.fyo.doc.getDoc(schemaName, name);
+      await st.delete();
+    }
+  }
+
+  async _validateStockTransferCancelled() {
+    const schemaName = this.stockTransferSchemaName;
+    const transfers = await this._getLinkedStockTransferNames(false);
+    if (!transfers?.length) {
+      return;
+    }
+
+    const names = transfers.map(({ name }) => name).join(', ');
+    const label = this.fyo.schemaMap[schemaName]?.label ?? schemaName;
+    throw new ValidationError(
+      this.fyo.t`Cannot cancel ${this.schema.label} ${this
+        .name!} because of the following ${label}: ${names}`
+    );
+  }
+
+  async _getLinkedStockTransferNames(cancelled: boolean) {
+    const name = this.name;
+    if (!name) {
+      throw new ValidationError(`Name not found for ${this.schema.label}`);
+    }
+
+    const schemaName = this.stockTransferSchemaName;
+    const transfers = (await this.fyo.db.getAllRaw(schemaName, {
+      fields: ['name'],
+      filters: { backReference: this.name!, cancelled },
+    })) as { name: string }[];
+    return transfers;
+  }
+
+  async getLinkedPayments() {
+    if (!this.hasLinkedPayments) {
+      return [];
+    }
+
+    const paymentFors = (await this.fyo.db.getAllRaw('PaymentFor', {
+      fields: ['parent', 'amount'],
+      filters: { referenceName: this.name!, referenceType: this.schemaName },
+    })) as { parent: string; amount: string }[];
+
+    const payments = (await this.fyo.db.getAllRaw('Payment', {
+      fields: ['name', 'date', 'submitted', 'cancelled'],
+      filters: { name: ['in', paymentFors.map((p) => p.parent)] },
+    })) as {
+      name: string;
+      date: string;
+      submitted: number;
+      cancelled: number;
+    }[];
+
+    return joinMapLists(payments, paymentFors, 'name', 'parent')
+      .map((j) => ({
+        name: j.name,
+        date: new Date(j.date),
+        submitted: !!j.submitted,
+        cancelled: !!j.cancelled,
+        amount: this.fyo.pesa(j.amount),
+      }))
+      .sort((a, b) => a.date.valueOf() - b.date.valueOf());
+  }
+
+  async getLinkedStockTransfers() {
+    if (!this.hasLinkedTransfers) {
+      return [];
+    }
+
+    const schemaName = this.stockTransferSchemaName;
+    const transfers = (await this.fyo.db.getAllRaw(schemaName, {
+      fields: ['name', 'date', 'submitted', 'cancelled'],
+      filters: { backReference: this.name! },
+    })) as {
+      name: string;
+      date: string;
+      submitted: number;
+      cancelled: number;
+    }[];
+
+    const itemSchemaName = schemaName + 'Item';
+    const transferItems = (await this.fyo.db.getAllRaw(itemSchemaName, {
+      fields: ['parent', 'quantity', 'location', 'amount'],
+      filters: {
+        parent: ['in', transfers.map((t) => t.name)],
+        item: ['in', this.items!.map((i) => i.item!)],
+      },
+    })) as {
+      parent: string;
+      quantity: number;
+      location: string;
+      amount: string;
+    }[];
+
+    return joinMapLists(transfers, transferItems, 'name', 'parent')
+      .map((j) => ({
+        name: j.name,
+        date: new Date(j.date),
+        submitted: !!j.submitted,
+        cancelled: !!j.cancelled,
+        amount: this.fyo.pesa(j.amount),
+        location: j.location,
+        quantity: j.quantity,
+      }))
+      .sort((a, b) => a.date.valueOf() - b.date.valueOf());
+  }
+
+  async addItem(name: string) {
+    return await addItem(name, this);
+  }
 }

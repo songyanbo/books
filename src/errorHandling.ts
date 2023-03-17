@@ -17,10 +17,13 @@ function shouldNotStore(error: Error) {
   return !shouldLog;
 }
 
-async function reportError(errorLogObj: ErrorLog) {
+export async function sendError(errorLogObj: ErrorLog) {
   if (!errorLogObj.stack) {
     return;
   }
+
+  errorLogObj.more ??= {};
+  errorLogObj.more!.path ??= router.currentRoute.value.fullPath;
 
   const body = {
     error_name: errorLogObj.name,
@@ -30,13 +33,14 @@ async function reportError(errorLogObj: ErrorLog) {
     version: fyo.store.appVersion,
     language: fyo.store.language,
     instance_id: fyo.store.instanceId,
+    device_id: fyo.store.deviceId,
     open_count: fyo.store.openCount,
     country_code: fyo.singles.SystemSettings?.countryCode,
-    more: stringifyCircular(errorLogObj.more ?? {}),
+    more: stringifyCircular(errorLogObj.more!),
   };
 
   if (fyo.store.isDevelopment) {
-    console.log('reportError', body);
+    console.log('sendError', body);
   }
 
   await ipcRenderer.invoke(IPC_ACTIONS.SEND_ERROR, JSON.stringify(body));
@@ -84,17 +88,21 @@ export async function handleError(
 
   const errorLogObj = getErrorLogObject(error, more ?? {});
 
-  await reportError(errorLogObj);
+  await sendError(errorLogObj);
   const toastProps = getToastProps(errorLogObj);
   await showToast(toastProps);
 }
 
 export async function handleErrorWithDialog(
-  error: Error,
+  error: unknown,
   doc?: Doc,
   reportError?: false,
   dontThrow?: false
 ) {
+  if (!(error instanceof Error)) {
+    return;
+  }
+
   const errorMessage = getErrorMessage(error, doc);
   await handleError(false, error, { errorMessage, doc });
 
@@ -171,15 +179,19 @@ export function getErrorHandledSync(func: Function) {
 function getIssueUrlQuery(errorLogObj?: ErrorLog): string {
   const baseUrl = 'https://github.com/frappe/books/issues/new?labels=bug';
 
-  const body = ['<h2>Description</h2>', 'Add some description...', ''];
+  const body = [
+    '<h2>Description</h2>',
+    'Add some description...',
+    '',
+    '<h2>Steps to Reproduce</h2>',
+    'Add steps to reproduce the error...',
+    '',
+    '<h2>Info</h2>',
+    '',
+  ];
 
   if (errorLogObj) {
-    body.push(
-      '<h2>Error Info</h2>',
-      '',
-      `**Error**: _${errorLogObj.name}: ${errorLogObj.message}_`,
-      ''
-    );
+    body.push(`**Error**: _${errorLogObj.name}: ${errorLogObj.message}_`, '');
   }
 
   if (errorLogObj?.stack) {
@@ -247,6 +259,10 @@ function getErrorLabel(error: Error) {
   }
 
   if (name === 'NotImplemented') {
+    return t`Error`;
+  }
+
+  if (name === 'ToDebugError') {
     return t`Error`;
   }
 

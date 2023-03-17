@@ -3,6 +3,7 @@ import { t } from 'fyo';
 import Badge from 'src/components/Badge.vue';
 import { fyo } from 'src/initFyo';
 import { fuzzyMatch } from 'src/utils';
+import { getCreateFiltersFromListViewFilters } from 'src/utils/misc';
 import { markRaw } from 'vue';
 import AutoComplete from './AutoComplete.vue';
 
@@ -15,22 +16,42 @@ export default {
   },
   mounted() {
     if (this.value) {
-      this.linkValue = this.value;
-    }
-
-    if (this.df.fieldname === 'incomeAccount') {
-      window.l = this;
+      this.setLinkValue();
     }
   },
   watch: {
     value: {
       immediate: true,
       handler(newValue) {
-        this.linkValue = newValue;
+        this.setLinkValue(newValue);
       },
     },
   },
   methods: {
+    async setLinkValue(newValue, isInput) {
+      if (isInput) {
+        return (this.linkValue = newValue || '');
+      }
+
+      const value = newValue ?? this.value;
+      const { fieldname, target } = this.df ?? {};
+      const displayField = fyo.schemaMap[target ?? '']?.linkDisplayField;
+
+      if (!displayField) {
+        return (this.linkValue = value);
+      }
+
+      let displayValue = this.docs?.links?.[fieldname]?.get(displayField);
+      if (!displayValue) {
+        displayValue = await fyo.getValue(
+          target,
+          this.value ?? '',
+          displayField
+        );
+      }
+
+      this.linkValue = displayValue;
+    },
     getTargetSchemaName() {
       return this.df.target;
     },
@@ -89,6 +110,7 @@ export default {
                 '<span class="text-gray-600">{{ t`No results found` }}</span>',
             }),
             action: () => {},
+            actionOnly: true,
           },
         ];
       }
@@ -98,18 +120,19 @@ export default {
     getCreateNewOption() {
       return {
         label: t`Create`,
-        value: 'Create',
         action: () => this.openNewDoc(),
+        actionOnly: true,
         component: markRaw({
           template:
             '<div class="flex items-center font-semibold">{{ t`Create` }}' +
-            '<Badge color="blue" class="ml-2" v-if="isNewValue">{{ linkValue }}</Badge>' +
+            '<Badge color="blue" class="ms-2" v-if="isNewValue">{{ linkValue }}</Badge>' +
             '</div>',
           computed: {
+            value: () => this.value,
             linkValue: () => this.linkValue,
             isNewValue: () => {
               let values = this.suggestions.map((d) => d.value);
-              return this.linkValue && !values.includes(this.linkValue);
+              return this.value && !values.includes(this.value);
             },
           },
           components: { Badge },
@@ -118,7 +141,7 @@ export default {
     },
     async openNewDoc() {
       const schemaName = this.df.target;
-      const doc = await fyo.doc.getNewDoc(schemaName);
+      const doc = fyo.doc.getNewDoc(schemaName);
 
       const filters = await this.getCreateFilters();
 
@@ -135,19 +158,22 @@ export default {
       doc.once('afterSync', () => {
         this.$emit('new-doc', doc);
         this.$router.back();
-        this.results = []
+        this.results = [];
+        this.triggerChange(doc.name);
       });
     },
     async getCreateFilters() {
       const { schemaName, fieldname } = this.df;
-      const getFilters = fyo.models[schemaName]?.createFilters?.[fieldname];
-      const filters = await getFilters?.(this.doc);
+      const getCreateFilters =
+        fyo.models[schemaName]?.createFilters?.[fieldname];
+      let createFilters = await getCreateFilters?.(this.doc);
 
-      if (filters === undefined) {
-        return await this.getFilters();
+      if (createFilters !== undefined) {
+        return createFilters;
       }
 
-      return filters;
+      const filters = await this.getFilters();
+      return getCreateFiltersFromListViewFilters(filters);
     },
     async getFilters() {
       const { schemaName, fieldname } = this.df;

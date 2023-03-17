@@ -8,22 +8,25 @@
         selectHighlightedItem,
       }"
     >
-      <div class="text-gray-600 text-sm mb-1" v-if="showLabel">
+      <div :class="labelClasses" v-if="showLabel">
         {{ df.label }}
       </div>
       <div
-        class="flex items-center justify-between pr-2 rounded"
-        :class="isReadOnly ? '' : 'focus-within:bg-gray-200'"
+        class="flex items-center justify-between pe-2 rounded"
+        :style="containerStyles"
+        :class="containerClasses"
       >
         <input
           ref="input"
           spellcheck="false"
           :class="inputClasses"
+          class="bg-transparent"
           type="text"
           :value="linkValue"
           :placeholder="inputPlaceholder"
           :readonly="isReadOnly"
           @focus="(e) => !isReadOnly && onFocus(e, toggleDropdown)"
+          @click="(e) => !isReadOnly && onFocus(e, toggleDropdown)"
           @blur="(e) => !isReadOnly && onBlur(e.target.value)"
           @input="onInput"
           @keydown.up="highlightItemUp"
@@ -31,32 +34,43 @@
           @keydown.enter="selectHighlightedItem"
           @keydown.tab="toggleDropdown(false)"
           @keydown.esc="toggleDropdown(false)"
+          :tabindex="isReadOnly ? '-1' : '0'"
         />
         <svg
-          v-if="!isReadOnly"
+          v-if="!isReadOnly && !canLink"
           class="w-3 h-3"
           style="background: inherit; margin-right: -3px"
           viewBox="0 0 5 10"
           xmlns="http://www.w3.org/2000/svg"
+          @click="(e) => !isReadOnly && onFocus(e, toggleDropdown)"
         >
           <path
             d="M1 2.636L2.636 1l1.637 1.636M1 7.364L2.636 9l1.637-1.636"
-            stroke="#404040"
+            class="stroke-current"
+            :class="showMandatory ? 'text-red-400' : 'text-gray-400'"
             fill="none"
             fill-rule="evenodd"
             stroke-linecap="round"
             stroke-linejoin="round"
           />
         </svg>
+        <button
+          v-if="canLink"
+          class="p-0.5 rounded -me1 bg-transparent"
+          @click="routeToLinkedDoc"
+        >
+          <FeatherIcon name="chevron-right" class="w-4 h-4 text-gray-600" />
+        </button>
       </div>
     </template>
   </Dropdown>
 </template>
-
 <script>
 import { getOptionList } from 'fyo/utils';
+import { FieldTypeEnum } from 'schemas/types';
 import Dropdown from 'src/components/Dropdown.vue';
 import { fuzzyMatch } from 'src/utils';
+import { getFormRoute, routeTo } from 'src/utils/ui';
 import Base from './Base.vue';
 
 export default {
@@ -69,7 +83,6 @@ export default {
   data() {
     return {
       linkValue: '',
-      showDropdown: false,
       isLoading: false,
       suggestions: [],
       highlightedIndex: -1,
@@ -79,7 +92,7 @@ export default {
     value: {
       immediate: true,
       handler(newValue) {
-        this.linkValue = this.getLabel(newValue);
+        this.setLinkValue(this.getLinkValue(newValue));
       },
     },
   },
@@ -87,7 +100,8 @@ export default {
     doc: { default: null },
   },
   mounted() {
-    this.linkValue = this.getLabel(this.linkValue || this.value);
+    const value = this.linkValue || this.value;
+    this.setLinkValue(this.getLinkValue(value));
   },
   computed: {
     options() {
@@ -97,28 +111,71 @@ export default {
 
       return getOptionList(this.df, this.doc);
     },
+    canLink() {
+      if (!this.value || !this.df) {
+        return false;
+      }
+
+      const fieldtype = this.df?.fieldtype;
+      const isLink = fieldtype === FieldTypeEnum.Link;
+      const isDynamicLink = fieldtype === FieldTypeEnum.DynamicLink;
+
+      if (!isLink && !isDynamicLink) {
+        return false;
+      }
+
+      if (isLink && this.df.target) {
+        return true;
+      }
+
+      const references = this.df.references;
+      if (!references) {
+        return false;
+      }
+
+      if (!this.doc?.[references]) {
+        return false;
+      }
+
+      return true;
+    },
   },
   methods: {
-    getLabel(value) {
+    async routeToLinkedDoc() {
+      let schemaName = this.df?.target;
+      const name = this.value;
+
+      if (!schemaName) {
+        const references = this.df?.references ?? '';
+        schemaName = this.doc?.[references];
+      }
+
+      if (!schemaName || !name) {
+        return;
+      }
+
+      const route = getFormRoute(schemaName, name);
+      await routeTo(route);
+    },
+    setLinkValue(value) {
+      this.linkValue = value;
+    },
+    getLinkValue(value) {
       const oldValue = this.linkValue;
       let option = this.options.find((o) => o.value === value);
       if (option === undefined) {
         option = this.options.find((o) => o.label === value);
       }
 
-      return option?.label ?? oldValue;
-    },
-    getValue(label) {
-      let option = this.options.find((o) => o.label === label);
-      if (option === undefined) {
-        option = this.options.find((o) => o.value === label);
+      if (!value && option === undefined) {
+        return null;
       }
 
-      return option?.value ?? label;
+      return option?.label ?? oldValue;
     },
     async updateSuggestions(keyword) {
       if (typeof keyword === 'string') {
-        this.linkValue = keyword;
+        this.setLinkValue(keyword, true);
       }
 
       this.isLoading = true;
@@ -153,8 +210,13 @@ export default {
         .map(({ item }) => item);
     },
     setSuggestion(suggestion) {
+      if (suggestion?.actionOnly) {
+        this.setLinkValue(this.value);
+        return;
+      }
+
       if (suggestion) {
-        this.linkValue = suggestion.label;
+        this.setLinkValue(suggestion.label);
         this.triggerChange(suggestion.value);
       }
 

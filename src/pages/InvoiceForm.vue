@@ -1,8 +1,25 @@
 <template>
   <FormContainer>
     <!-- Page Header (Title, Buttons, etc) -->
+    <template #header-left v-if="doc">
+      <StatusBadge :status="status" class="h-8" />
+      <Barcode
+        class="h-8"
+        v-if="doc.canEdit && fyo.singles.InventorySettings?.enableBarcodes"
+        @item-selected="(name) => doc.addItem(name)"
+      />
+    </template>
     <template #header v-if="doc">
-      <StatusBadge :status="status" />
+      <ExchangeRate
+        v-if="doc.isMultiCurrency"
+        :disabled="doc?.isSubmitted || doc?.isCancelled"
+        :from-currency="fromCurrency"
+        :to-currency="toCurrency"
+        :exchange-rate="doc.exchangeRate"
+        @change="
+          async (exchangeRate) => await doc.set('exchangeRate', exchangeRate)
+        "
+      />
       <Button
         v-if="!doc.isCancelled && !doc.dirty"
         :icon="true"
@@ -17,122 +34,80 @@
       >
         <feather-icon name="settings" class="w-4 h-4" />
       </Button>
-      <DropdownWithActions :actions="actions()" />
-      <Button
-        v-if="doc?.notInserted || doc?.dirty"
-        type="primary"
-        @click="sync"
+      <DropdownWithActions
+        v-for="group of groupedActions"
+        :key="group.label"
+        :type="group.type"
+        :actions="group.actions"
       >
+        <p v-if="group.group">
+          {{ group.group }}
+        </p>
+        <feather-icon v-else name="more-horizontal" class="w-4 h-4" />
+      </DropdownWithActions>
+      <Button v-if="doc?.canSave" type="primary" @click="sync">
         {{ t`Save` }}
       </Button>
-      <Button
-        v-if="!doc?.dirty && !doc?.notInserted && !doc?.submitted"
-        type="primary"
-        @click="submit"
-        >{{ t`Submit` }}</Button
-      >
+      <Button v-else-if="doc?.canSubmit" type="primary" @click="submit">{{
+        t`Submit`
+      }}</Button>
     </template>
 
     <!-- Invoice Form -->
     <template #body v-if="doc">
-      <div
-        class="
-          px-4
-          text-xl
-          font-semibold
-          flex
-          justify-between
-          h-row-large
-          items-center
+      <FormHeader
+        :form-title="doc.notInserted ? t`New Entry` : doc.name"
+        :form-sub-title="
+          doc.schemaName === 'SalesInvoice'
+            ? t`Sales Invoice`
+            : t`Purchase Invoice`
         "
-      >
-        <h1>
-          {{ doc.notInserted ? t`New Entry` : doc.name }}
-        </h1>
-        <p class="text-gray-600">
-          {{
-            doc.schemaName === 'SalesInvoice'
-              ? t`Sales Invoice`
-              : t`Purchase Invoice`
-          }}
-        </p>
-      </div>
+      />
       <hr />
 
       <div>
         <!-- Invoice Form Data Entry -->
         <div class="m-4 grid grid-cols-3 gap-4">
           <FormControl
-            class="bg-gray-100 rounded text-base"
-            input-class="text-lg font-semibold bg-transparent"
+            input-class="font-semibold"
+            :border="true"
             :df="getField('party')"
             :value="doc.party"
-            @change="(value) => doc.set('party', value)"
-            @new-doc="(party) => doc.set('party', party.name)"
+            @change="(value) => doc.set('party', value, true)"
+            @new-doc="(party) => doc.set('party', party.name, true)"
             :read-only="doc?.submitted"
           />
           <FormControl
-            input-class="bg-gray-100 px-3 py-2 text-base text-right"
+            input-class="text-end"
+            :border="true"
             :df="getField('date')"
             :value="doc.date"
             @change="(value) => doc.set('date', value)"
             :read-only="doc?.submitted"
           />
           <FormControl
-            class="text-base bg-gray-100 rounded"
-            input-class="bg-transparent px-3 py-2 text-base text-right"
+            input-class="text-end"
+            :border="true"
             :df="getField('numberSeries')"
             :value="doc.numberSeries"
             @change="(value) => doc.set('numberSeries', value)"
             :read-only="!doc.notInserted || doc?.submitted"
           />
           <FormControl
-            class="text-base bg-gray-100 rounded"
-            input-class="px-3 py-2 text-base bg-transparent"
+            :border="true"
             :df="getField('account')"
             :value="doc.account"
             @change="(value) => doc.set('account', value)"
             :read-only="doc?.submitted"
           />
-          <!-- 
           <FormControl
-            v-if="doc.enableDiscounting"
-            :show-label="true"
-            :label-right="false"
-            class="
-              text-base
-              bg-gray-100
-              rounded
-              flex
-              items-center
-              justify-center
-              w-ful
-            "
-            input-class="px-3 py-2 text-base bg-transparent text-right"
-            :df="getField('setDiscountAmount')"
-            :value="doc.setDiscountAmount"
-            @change="(value) => doc.set('setDiscountAmount', value)"
+            v-if="doc.attachment || !(doc.isSubmitted || doc.isCancelled)"
+            :border="true"
+            :df="getField('attachment')"
+            :value="doc.attachment"
+            @change="(value) => doc.set('attachment', value)"
             :read-only="doc?.submitted"
           />
-          <FormControl
-            v-if="doc.enableDiscounting && !doc.setDiscountAmount"
-            class="text-base bg-gray-100 rounded"
-            input-class="px-3 py-2 text-base bg-transparent text-right"
-            :df="getField('discountPercent')"
-            :value="doc.discountPercent"
-            @change="(value) => doc.set('discountPercent', value)"
-            :read-only="doc?.submitted"
-          />
-          <FormControl
-            v-if="doc.enableDiscounting && doc.setDiscountAmount"
-            class="text-base bg-gray-100 rounded"
-            input-class="px-3 py-2 text-base bg-transparent text-right"
-            :df="getField('discountAmount')"
-            :value="doc.discountAmount"
-            @change="(value) => doc.set('discountAmount', value)"
-            :read-only="doc?.submitted"
-          />
-          -->
         </div>
         <hr />
 
@@ -155,16 +130,21 @@
         <hr />
         <div class="flex justify-between text-base m-4 gap-12">
           <div class="w-1/2 flex flex-col justify-between">
-            <!-- Discount Note -->
+            <!-- Info Note -->
             <p v-if="discountNote?.length" class="text-gray-600 text-sm">
               {{ discountNote }}
             </p>
+
+            <p v-if="stockTransferText?.length" class="text-gray-600 text-sm">
+              {{ stockTransferText }}
+            </p>
+
             <!-- Form Terms-->
             <FormControl
+              :border="true"
               v-if="!doc?.submitted || doc.terms"
               :df="getField('terms')"
               :value="doc.terms"
-              input-class="bg-gray-100"
               class="mt-auto"
               @change="(value) => doc.set('terms', value)"
               :read-only="doc?.submitted"
@@ -172,7 +152,7 @@
           </div>
 
           <!-- Totals -->
-          <div class="w-1/2 gap-2 flex flex-col self-end ml-auto">
+          <div class="w-1/2 gap-2 flex flex-col self-end ms-auto">
             <!-- Subtotal -->
             <div class="flex justify-between">
               <div>{{ t`Subtotal` }}</div>
@@ -214,10 +194,14 @@
                 <div>{{ tax.account }}</div>
                 <div>
                   {{
-                    fyo.format(tax.amount, {
-                      fieldtype: 'Currency',
-                      currency: doc.currency,
-                    })
+                    fyo.format(
+                      tax.amount,
+                      {
+                        fieldtype: 'Currency',
+                        fieldname: 'amount',
+                      },
+                      tax
+                    )
                   }}
                 </div>
               </div>
@@ -259,6 +243,21 @@
               <div>{{ formattedValue('grandTotal') }}</div>
             </div>
 
+            <!-- Base Grand Total -->
+            <div
+              v-if="doc.isMultiCurrency"
+              class="
+                flex
+                justify-between
+                text-green-600
+                font-semibold
+                text-base
+              "
+            >
+              <div>{{ t`Base Grand Total` }}</div>
+              <div>{{ formattedValue('baseGrandTotal') }}</div>
+            </div>
+
             <!-- Outstanding Amount -->
             <hr v-if="doc.outstandingAmount?.float > 0" />
             <div
@@ -273,20 +272,30 @@
       </div>
     </template>
 
-    <template #quickedit v-if="quickEditDoc">
-      <QuickEditForm
-        class="w-quick-edit"
-        :name="quickEditDoc.name"
-        :show-name="false"
-        :show-save="false"
-        :source-doc="quickEditDoc"
-        :source-fields="quickEditFields"
-        :schema-name="quickEditDoc.schemaName"
-        :white="true"
-        :route-back="false"
-        :load-on-close="false"
-        @close="toggleQuickEditDoc(null)"
-      />
+    <template #quickedit>
+      <Transition name="quickedit">
+        <QuickEditForm
+          v-if="quickEditDoc && !linked"
+          :name="quickEditDoc.name"
+          :show-name="false"
+          :show-save="false"
+          :source-doc="quickEditDoc"
+          :source-fields="quickEditFields"
+          :schema-name="quickEditDoc.schemaName"
+          :white="true"
+          :route-back="false"
+          :load-on-close="false"
+          @close="toggleQuickEditDoc(null)"
+        />
+      </Transition>
+
+      <Transition name="quickedit">
+        <LinkedEntryWidget
+          v-if="linked && !quickEditDoc"
+          :linked="linked"
+          @close-widget="linked = null"
+        />
+      </Transition>
     </template>
   </FormContainer>
 </template>
@@ -295,18 +304,23 @@ import { computed } from '@vue/reactivity';
 import { getDocStatus } from 'models/helpers';
 import { ModelNameEnum } from 'models/types';
 import Button from 'src/components/Button.vue';
+import Barcode from 'src/components/Controls/Barcode.vue';
+import ExchangeRate from 'src/components/Controls/ExchangeRate.vue';
 import FormControl from 'src/components/Controls/FormControl.vue';
 import Table from 'src/components/Controls/Table.vue';
 import DropdownWithActions from 'src/components/DropdownWithActions.vue';
 import FormContainer from 'src/components/FormContainer.vue';
+import FormHeader from 'src/components/FormHeader.vue';
 import StatusBadge from 'src/components/StatusBadge.vue';
+import LinkedEntryWidget from 'src/components/Widgets/LinkedEntryWidget.vue';
 import { fyo } from 'src/initFyo';
 import { docsPathMap } from 'src/utils/misc';
+import { docsPathRef, focusedDocsRef } from 'src/utils/refs';
 import {
-docsPath,
-getActionsForDocument,
-routeTo,
-showMessageDialog
+  commonDocSync,
+  commonDocSubmit,
+  getGroupedActionsForDoc,
+  routeTo,
 } from 'src/utils/ui';
 import { nextTick } from 'vue';
 import { handleErrorWithDialog } from '../errorHandling';
@@ -323,6 +337,10 @@ export default {
     Table,
     FormContainer,
     QuickEditForm,
+    ExchangeRate,
+    FormHeader,
+    LinkedEntryWidget,
+    Barcode,
   },
   provide() {
     return {
@@ -340,12 +358,63 @@ export default {
       color: null,
       printSettings: null,
       companyName: null,
+      linked: null,
     };
   },
   updated() {
     this.chstatus = !this.chstatus;
   },
   computed: {
+    stockTransferText() {
+      if (!this.fyo.singles.AccountingSettings.enableInventory) {
+        return '';
+      }
+
+      if (!this.doc.submitted) {
+        return '';
+      }
+
+      const totalQuantity = this.doc.getTotalQuantity();
+      const stockNotTransferred = this.doc.stockNotTransferred;
+
+      if (stockNotTransferred === 0) {
+        return this.t`Stock has been transferred`;
+      }
+
+      const stn = this.fyo.format(stockNotTransferred, 'Float');
+      const tq = this.fyo.format(totalQuantity, 'Float');
+
+      return this.t`Stock qty. ${stn} out of ${tq} left to transfer`;
+    },
+    groupedActions() {
+      const actions = getGroupedActionsForDoc(this.doc);
+      const group = this.t`View`;
+      const viewgroup = actions.find((f) => f.group === group);
+
+      if (viewgroup && this.doc?.hasLinkedPayments) {
+        viewgroup.actions.push({
+          label: this.t`Payments`,
+          group,
+          condition: (doc) => doc.hasLinkedPayments,
+          action: async () => this.setlinked(ModelNameEnum.Payment),
+        });
+      }
+
+      if (viewgroup && this.doc?.hasLinkedTransfers) {
+        const label = this.doc.isSales
+          ? this.t`Shipments`
+          : this.t`Purchase Receipts`;
+
+        viewgroup.actions.push({
+          label,
+          group,
+          condition: (doc) => doc.hasLinkedTransfers,
+          action: async () => this.setlinked(this.doc.stockTransferSchemaName),
+        });
+      }
+
+      return actions;
+    },
     address() {
       return this.printSettings && this.printSettings.getLink('address');
     },
@@ -381,16 +450,25 @@ export default {
     itemDiscountAmount() {
       return this.doc.getItemDiscountAmount();
     },
+    fromCurrency() {
+      return this.doc?.currency ?? this.toCurrency;
+    },
+    toCurrency() {
+      return fyo.singles.SystemSettings.currency;
+    },
   },
   activated() {
-    docsPath.value = docsPathMap[this.schemaName];
+    docsPathRef.value = docsPathMap[this.schemaName];
+    focusedDocsRef.add(this.doc);
   },
   deactivated() {
-    docsPath.value = '';
+    docsPathRef.value = '';
+    focusedDocsRef.delete(this.doc);
   },
   async mounted() {
     try {
       this.doc = await fyo.doc.getDoc(this.schemaName, this.name);
+      focusedDocsRef.add(this.doc);
     } catch (error) {
       if (error instanceof fyo.errors.NotFoundError) {
         routeTo(`/list/${this.schemaName}`);
@@ -412,6 +490,26 @@ export default {
   },
   methods: {
     routeTo,
+    async setlinked(schemaName) {
+      let entries = [];
+      let title = '';
+
+      if (schemaName === ModelNameEnum.Payment) {
+        title = this.t`Payments`;
+        entries = await this.doc.getLinkedPayments();
+      } else {
+        title = this.doc.isSales
+          ? this.t`Shipments`
+          : this.t`Purchase Receipts`;
+        entries = await this.doc.getLinkedStockTransfers();
+      }
+
+      if (this.quickEditDoc) {
+        this.toggleQuickEditDoc(null);
+      }
+
+      this.linked = { entries, schemaName, title };
+    },
     toggleInvoiceSettings() {
       if (!this.schemaName) {
         return;
@@ -431,46 +529,25 @@ export default {
       }
 
       this.quickEditDoc = doc;
+      if (
+        doc?.schemaName?.includes('InvoiceItem') &&
+        doc?.stockNotTransferred
+      ) {
+        fields = [...doc.schema.quickEditFields, 'stockNotTransferred'].map(
+          (f) => fyo.getField(doc.schemaName, f)
+        );
+      }
+
       this.quickEditFields = fields;
-    },
-    actions() {
-      return getActionsForDocument(this.doc);
     },
     getField(fieldname) {
       return fyo.getField(this.schemaName, fieldname);
     },
     async sync() {
-      try {
-        await this.doc.sync();
-      } catch (err) {
-        await this.handleError(err);
-      }
+      await commonDocSync(this.doc);
     },
     async submit() {
-      const message =
-        this.schemaName === ModelNameEnum.SalesInvoice
-          ? this.t`Submit Sales Invoice?`
-          : this.t`Submit Purchase Invoice?`;
-      const ref = this;
-      await showMessageDialog({
-        message,
-        buttons: [
-          {
-            label: this.t`Yes`,
-            async action() {
-              try {
-                await ref.doc.submit();
-              } catch (err) {
-                await ref.handleError(err);
-              }
-            },
-          },
-          {
-            label: this.t`No`,
-            action() {},
-          },
-        ],
-      });
+      await commonDocSubmit(this.doc);
     },
     async handleError(e) {
       await handleErrorWithDialog(e, this.doc);

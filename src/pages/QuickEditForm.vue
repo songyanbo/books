@@ -1,11 +1,21 @@
 <template>
   <div
-    class="border-l h-full overflow-auto"
+    class="border-s h-full overflow-auto w-quick-edit"
     :class="white ? 'bg-white' : 'bg-gray-25'"
   >
     <!-- Quick edit Tool bar -->
     <div
-      class="flex items-center justify-between px-4 h-row-largest"
+      class="
+        flex
+        items-center
+        justify-between
+        px-4
+        h-row-largest
+        sticky
+        top-0
+        bg-white
+      "
+      style="z-index: 1"
       :class="{ 'border-b': showName }"
     >
       <!-- Close Button and Status Text -->
@@ -13,7 +23,7 @@
         <Button :icon="true" @click="routeToPrevious">
           <feather-icon name="x" class="w-4 h-4" />
         </Button>
-        <span v-if="statusText" class="ml-2 text-base text-gray-600">{{
+        <span v-if="statusText" class="ms-2 text-base text-gray-600">{{
           statusText
         }}</span>
       </div>
@@ -26,7 +36,7 @@
           :icon="true"
           @click="sync"
           type="primary"
-          v-if="doc?.dirty || doc?.notInserted"
+          v-if="doc?.canSave"
           class="text-white text-xs"
         >
           {{ t`Save` }}
@@ -35,12 +45,7 @@
           :icon="true"
           @click="submit"
           type="primary"
-          v-if="
-            schema?.isSubmittable &&
-            !doc?.submitted &&
-            !doc?.notInserted &&
-            !(doc?.cancelled || false)
-          "
+          v-else-if="doc?.canSubmit"
           class="text-white text-xs"
         >
           {{ t`Submit` }}
@@ -50,37 +55,45 @@
 
     <!-- Name and image -->
     <div
-      class="px-4 flex-center flex flex-col items-center gap-1.5"
-      style="height: calc(var(--h-row-mid) * 2 + 1px)"
-      v-if="doc && showName"
+      class="items-center"
+      :class="imageField ? 'grid' : 'flex justify-center'"
+      :style="{
+        height: `calc(var(--h-row-mid) * ${!!imageField ? '2 + 1px' : '1'})`,
+        gridTemplateColumns: `minmax(0, 1.1fr) minmax(0, 2fr)`,
+      }"
+      v-if="doc && showName && (titleField || imageField)"
     >
       <FormControl
         v-if="imageField"
+        class="ms-4"
         :df="imageField"
         :value="doc[imageField.fieldname]"
         @change="(value) => valueChange(imageField, value)"
-        size="small"
-        :letter-placeholder="doc[titleField.fieldname]?.[0] ?? null"
+        :letter-placeholder="doc[titleField.fieldname]?.[0] ?? ''"
       />
       <FormControl
-        input-class="text-center h-8 bg-transparent"
-        ref="titleControl"
         v-if="titleField"
+        :class="!!imageField ? 'me-4' : 'w-full mx-4'"
+        :input-class="[
+          'font-semibold text-xl',
+          !!imageField ? '' : 'text-center',
+        ]"
+        ref="titleControl"
+        size="small"
         :df="titleField"
         :value="doc[titleField.fieldname]"
-        :read-only="doc.inserted"
+        :read-only="doc.inserted || doc.schema.naming !== 'manual'"
         @change="(value) => valueChange(titleField, value)"
-        @input="setTitleSize"
       />
     </div>
 
     <!-- Rest of the form -->
     <TwoColumnForm
-      ref="form"
       v-if="doc"
+      class="w-full"
+      ref="form"
       :doc="doc"
       :fields="fields"
-      :autosave="false"
       :column-ratio="[1.1, 2]"
     />
 
@@ -101,7 +114,13 @@ import StatusBadge from 'src/components/StatusBadge.vue';
 import TwoColumnForm from 'src/components/TwoColumnForm.vue';
 import { fyo } from 'src/initFyo';
 import { getQuickEditWidget } from 'src/utils/quickEditWidgets';
-import { getActionsForDocument, openQuickEdit } from 'src/utils/ui';
+import { focusedDocsRef } from 'src/utils/refs';
+import {
+  commonDocSubmit,
+  commonDocSync,
+  getActionsForDoc,
+  openQuickEdit,
+} from 'src/utils/ui';
 
 export default {
   name: 'QuickEditForm',
@@ -143,17 +162,26 @@ export default {
       statusText: null,
     };
   },
-  mounted() {
+  async mounted() {
     if (this.defaults) {
       this.values = JSON.parse(this.defaults);
     }
+
+    await this.fetchFieldsAndDoc();
+    focusedDocsRef.add(this.doc);
 
     if (fyo.store.isDevelopment) {
       window.qef = this;
     }
   },
-  async created() {
-    await this.fetchFieldsAndDoc();
+  activated() {
+    focusedDocsRef.add(this.doc);
+  },
+  deactivated() {
+    focusedDocsRef.delete(this.doc);
+  },
+  unmounted() {
+    focusedDocsRef.delete(this.doc);
   },
   computed: {
     isChild() {
@@ -189,7 +217,7 @@ export default {
       return fieldnames.map((f) => fyo.getField(this.schemaName, f));
     },
     actions() {
-      return getActionsForDocument(this.doc);
+      return getActionsForDoc(this.doc);
     },
     quickEditWidget() {
       if (this.doc?.notInserted ?? true) {
@@ -223,9 +251,6 @@ export default {
       if (this.values) {
         this.doc?.set(this.values);
       }
-
-      // set title size
-      this.setTitleSize();
     },
     setTitleField() {
       const { fieldname, readOnly } = this.titleField;
@@ -284,27 +309,17 @@ export default {
     },
     async sync() {
       this.statusText = t`Saving`;
-      try {
-        await this.$refs.form.sync();
-        setTimeout(() => {
-          this.statusText = null;
-        }, 300);
-      } catch (err) {
+      await commonDocSync(this.doc);
+      setTimeout(() => {
         this.statusText = null;
-        console.error(err);
-      }
+      }, 300);
     },
     async submit() {
       this.statusText = t`Submitting`;
-      try {
-        await this.$refs.form.submit();
-        setTimeout(() => {
-          this.statusText = null;
-        }, 300);
-      } catch (err) {
+      await commonDocSubmit(this.doc);
+      setTimeout(() => {
         this.statusText = null;
-        console.error(err);
-      }
+      }, 300);
     },
     routeToPrevious() {
       if (this.loadOnClose && this.doc.dirty && !this.doc.notInserted) {
@@ -316,16 +331,6 @@ export default {
       } else {
         this.$emit('close');
       }
-    },
-    setTitleSize() {
-      if (!this.$refs.titleControl) {
-        return;
-      }
-
-      const input = this.$refs.titleControl.getInput();
-      const value = input.value;
-      const valueLength = (value || '').length + 1;
-      input.size = Math.max(valueLength, 15);
     },
   },
 };

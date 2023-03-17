@@ -1,6 +1,6 @@
 <template>
   <div
-    class="py-2 h-full flex justify-between flex-col bg-gray-25"
+    class="py-2 h-full flex justify-between flex-col bg-gray-25 relative"
     :class="{
       'window-drag': platform !== 'Windows',
     }"
@@ -9,7 +9,9 @@
       <!-- Company name and DB Switcher -->
       <div
         class="px-4 flex flex-row items-center justify-between mb-4"
-        :class="platform === 'Mac' ? 'mt-10' : 'mt-2'"
+        :class="
+          platform === 'Mac' && languageDirection === 'ltr' ? 'mt-10' : 'mt-2'
+        "
       >
         <h6
           class="
@@ -30,20 +32,21 @@
           class="px-4 flex items-center cursor-pointer hover:bg-gray-100 h-10"
           :class="
             isGroupActive(group) && !group.items
-              ? 'bg-gray-100 border-l-4 border-blue-500'
+              ? 'bg-gray-100 border-s-4 border-blue-500'
               : ''
           "
           @click="onGroupClick(group)"
         >
           <Icon
+            class="flex-shrink-0"
             :name="group.icon"
             :size="group.iconSize || '18'"
             :height="group.iconHeight"
             :active="isGroupActive(group)"
-            :class="isGroupActive(group) && !group.items ? '-ml-1' : ''"
+            :class="isGroupActive(group) && !group.items ? '-ms-1' : ''"
           />
           <div
-            class="ml-2 text-lg text-gray-900"
+            class="ms-2 text-lg text-gray-900"
             :class="isGroupActive(group) && !group.items && 'text-blue-600'"
           >
             {{ group.label }}
@@ -58,7 +61,7 @@
             class="
               text-base text-gray-800
               h-10
-              pl-10
+              ps-10
               cursor-pointer
               flex
               items-center
@@ -66,7 +69,7 @@
             "
             :class="
               isItemActive(item)
-                ? 'bg-gray-100 text-blue-600 border-l-4 border-blue-500'
+                ? 'bg-gray-100 text-blue-600 border-s-4 border-blue-500'
                 : ''
             "
             @click="onItemClick(item)"
@@ -91,7 +94,7 @@
         "
         @click="openDocumentation"
       >
-        <feather-icon name="help-circle" class="h-4 w-4" />
+        <feather-icon name="help-circle" class="h-4 w-4 flex-shrink-0" />
         <p>
           {{ t`Help` }}
         </p>
@@ -105,9 +108,23 @@
           gap-1
           items-center
         "
+        @click="viewShortcuts = true"
+      >
+        <feather-icon name="command" class="h-4 w-4 flex-shrink-0" />
+        <p>{{ t`Shortcuts` }}</p>
+      </button>
+
+      <button
+        class="
+          flex
+          text-sm text-gray-600
+          hover:text-gray-800
+          gap-1
+          items-center
+        "
         @click="$emit('change-db-file')"
       >
-        <feather-icon name="database" class="h-4 w-4" />
+        <feather-icon name="database" class="h-4 w-4 flex-shrink-0" />
         <p>{{ t`Change DB` }}</p>
       </button>
 
@@ -121,19 +138,41 @@
         "
         @click="() => reportIssue()"
       >
-        <feather-icon name="flag" class="h-4 w-4" />
+        <feather-icon name="flag" class="h-4 w-4 flex-shrink-0" />
         <p>
           {{ t`Report Issue` }}
         </p>
       </button>
 
       <p
-        v-if="fyo.store.isDevelopment"
+        v-if="!fyo.store.isDevelopment"
         class="text-xs text-gray-500 select-none"
       >
         dev mode
       </p>
     </div>
+
+    <!-- Hide Sidebar Button -->
+    <button
+      class="
+        absolute
+        bottom-0
+        end-0
+        text-gray-600
+        hover:bg-gray-100
+        rounded
+        p-1
+        m-4
+        rtl-rotate-180
+      "
+      @click="() => toggleSidebar()"
+    >
+      <feather-icon name="chevrons-left" class="w-4 h-4" />
+    </button>
+
+    <Modal :open-modal="viewShortcuts" @closemodal="viewShortcuts = false">
+      <ShortcutsHelper class="w-form" />
+    </Modal>
   </div>
 </template>
 <script>
@@ -141,18 +180,23 @@ import Button from 'src/components/Button.vue';
 import { reportIssue } from 'src/errorHandling';
 import { fyo } from 'src/initFyo';
 import { openLink } from 'src/utils/ipcCalls';
+import { docsPathRef } from 'src/utils/refs';
 import { getSidebarConfig } from 'src/utils/sidebarConfig';
-import { docsPath, routeTo } from 'src/utils/ui';
+import { routeTo, toggleSidebar } from 'src/utils/ui';
 import router from '../router';
 import Icon from './Icon.vue';
+import Modal from './Modal.vue';
+import ShortcutsHelper from './ShortcutsHelper.vue';
 
 export default {
   components: [Button],
+  inject: ['languageDirection', 'shortcuts'],
   emits: ['change-db-file'],
   data() {
     return {
       companyName: '',
       groups: [],
+      viewShortcuts: false,
       activeGroup: null,
     };
   },
@@ -163,22 +207,36 @@ export default {
   },
   components: {
     Icon,
+    Modal,
+    ShortcutsHelper,
   },
   async mounted() {
     const { companyName } = await fyo.doc.getDoc('AccountingSettings');
     this.companyName = companyName;
-    this.groups = getSidebarConfig();
+    this.groups = await getSidebarConfig();
 
     this.setActiveGroup();
     router.afterEach(() => {
       this.setActiveGroup();
     });
+
+    this.shortcuts.shift.set(['KeyH'], () => {
+      if (document.body === document.activeElement) {
+        this.toggleSidebar();
+      }
+    });
+    this.shortcuts.set(['F1'], () => this.openDocumentation());
+  },
+  unmounted() {
+    this.shortcuts.alt.delete(['KeyH']);
+    this.shortcuts.delete(['F1']);
   },
   methods: {
     routeTo,
     reportIssue,
+    toggleSidebar,
     openDocumentation() {
-      openLink('https://docs.frappebooks.com/' + docsPath.value);
+      openLink('https://docs.frappebooks.com/' + docsPathRef.value);
     },
     setActiveGroup() {
       const { fullPath } = this.$router.currentRoute.value;
@@ -208,11 +266,18 @@ export default {
       }
     },
     isItemActive(item) {
-      let { path: currentRoute, params } = this.$route;
-      let routeMatch = currentRoute === item.route;
-      let schemaNameMatch =
+      const { path: currentRoute, params } = this.$route;
+      const routeMatch = currentRoute === item.route;
+
+      const schemaNameMatch =
         item.schemaName && params.schemaName === item.schemaName;
-      return routeMatch || schemaNameMatch;
+
+      const isMatch = routeMatch || schemaNameMatch;
+      if (params.name && item.schemaName && !isMatch) {
+        return currentRoute.includes(`${item.schemaName}/${params.name}`);
+      }
+
+      return isMatch;
     },
     isGroupActive(group) {
       return this.activeGroup && group.label === this.activeGroup.label;
@@ -223,16 +288,25 @@ export default {
       }
 
       if (group.route) {
-        routeTo(group.route);
+        routeTo(this.getPath(group));
       }
     },
     onItemClick(item) {
       if (item.action) {
         item.action();
       }
+
       if (item.route) {
-        routeTo(item.route);
+        routeTo(this.getPath(item));
       }
+    },
+    getPath(item) {
+      const { route: path, filters } = item;
+      if (!filters) {
+        return path;
+      }
+
+      return { path, query: { filters: JSON.stringify(filters) } };
     },
   },
 };

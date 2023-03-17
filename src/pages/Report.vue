@@ -14,15 +14,17 @@
     </PageHeader>
 
     <!-- Filters -->
-    <div v-if="report" class="grid grid-cols-5 gap-2 p-4 border-b">
+    <div
+      v-if="report && report.filters.length"
+      class="grid grid-cols-5 gap-4 p-4 border-b"
+    >
       <FormControl
         v-for="field in report.filters"
+        :border="true"
         size="small"
-        :show-label="field.fieldtype === 'Check'"
+        :class="[field.fieldtype === 'Check' ? 'self-end' : '']"
+        :show-label="true"
         :key="field.fieldname + '-filter'"
-        class="bg-gray-100 rounded"
-        :class="field.fieldtype === 'Check' ? 'flex pl-2 py-1' : ''"
-        input-class="bg-transparent text-sm"
         :df="field"
         :value="report.get(field.fieldname)"
         :read-only="loading"
@@ -44,7 +46,7 @@ import PageHeader from 'src/components/PageHeader.vue';
 import ListReport from 'src/components/Report/ListReport.vue';
 import { fyo } from 'src/initFyo';
 import { docsPathMap } from 'src/utils/misc';
-import { docsPath } from 'src/utils/ui';
+import { docsPathRef } from 'src/utils/refs';
 import { defineComponent } from 'vue';
 
 export default defineComponent({
@@ -68,7 +70,7 @@ export default defineComponent({
   },
   components: { PageHeader, FormControl, ListReport, DropdownWithActions },
   async activated() {
-    docsPath.value = docsPathMap[this.reportClassName] ?? docsPathMap.Reports;
+    docsPathRef.value = docsPathMap[this.reportClassName] ?? docsPathMap.Reports;
     await this.setReportData();
 
     const filters = JSON.parse(this.defaultFilters);
@@ -86,7 +88,7 @@ export default defineComponent({
     }
   },
   deactivated() {
-    docsPath.value = '';
+    docsPathRef.value = '';
   },
   computed: {
     title() {
@@ -102,7 +104,7 @@ export default defineComponent({
         acc[ac.group] ??= {
           group: ac.group,
           label: ac.label ?? '',
-          type: ac.type,
+          e: ac.type,
           actions: [],
         };
 

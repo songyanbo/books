@@ -1,9 +1,17 @@
 <template>
   <div class="flex flex-col h-full">
-    <PageHeader :title="t`Chart of Accounts`" />
+    <PageHeader :title="t`Chart of Accounts`">
+      <Button v-if="!isAllExpanded" @click="expand">{{ t`Expand` }}</Button>
+      <Button v-if="!isAllCollapsed" @click="collapse">{{
+        t`Collapse`
+      }}</Button>
+    </PageHeader>
 
     <!-- Chart of Accounts -->
-    <div class="flex-1 flex flex-col overflow-y-auto mb-4" v-if="root">
+    <div
+      class="flex-1 flex flex-col overflow-y-auto mb-4 custom-scroll"
+      v-if="root"
+    >
       <!-- Chart of Accounts Indented List -->
       <template v-for="account in allAccounts" :key="account.name">
         <!-- Account List Item -->
@@ -17,26 +25,26 @@
             items-center
             border-b
             flex-shrink-0
-            pr-4
+            pe-4
           "
           :class="[
             account.level !== 0 ? 'text-base' : 'text-lg',
             isQuickEditOpen(account) ? 'bg-gray-200' : '',
           ]"
-          :style="`height: calc(var(--h-row-mid) + 1px); padding-left: calc(1rem + 2rem * ${account.level})`"
+          :style="getItemStyle(account.level)"
           @click="onClick(account)"
         >
           <component :is="getIconComponent(account)" />
           <div class="flex items-baseline">
             <div
-              class="ml-4"
+              class="ms-4"
               :class="[!account.parentAccount && 'font-semibold']"
             >
               {{ account.name }}
             </div>
 
             <!-- Add Account Buttons on Group Hover -->
-            <div v-if="account.isGroup" class="ml-6 hidden group-hover:block">
+            <div v-if="account.isGroup" class="ms-6 hidden group-hover:block">
               <button
                 class="
                   text-xs text-gray-800
@@ -49,7 +57,7 @@
               </button>
               <button
                 class="
-                  ml-3
+                  ms-3
                   text-xs text-gray-800
                   hover:text-gray-900
                   focus:outline-none
@@ -62,7 +70,7 @@
           </div>
 
           <!-- Account Balance String -->
-          <p class="ml-auto text-base text-gray-800" v-if="!account.isGroup">
+          <p class="ms-auto text-base text-gray-800" v-if="!account.isGroup">
             {{ getBalanceString(account) }}
           </p>
         </div>
@@ -80,15 +88,13 @@
             items-center
             text-base
           "
-          :style="`height: calc(var(--h-row-mid) + 1px); padding-left: calc(1rem + 2rem * ${
-            account.level + 1
-          })`"
+          :style="getGroupStyle(account.level + 1)"
           :key="account.name + '-adding-account'"
         >
           <component
             :is="getIconComponent({ isGroup: account.addingGroupAccount })"
           />
-          <div class="flex ml-4 h-row-mid items-center">
+          <div class="flex ms-4 h-row-mid items-center">
             <input
               class="focus:outline-none bg-transparent"
               :class="{ 'text-gray-600': insertingAccount }"
@@ -105,7 +111,7 @@
             <button
               v-if="!insertingAccount"
               class="
-                ml-4
+                ms-4
                 text-xs text-gray-800
                 hover:text-gray-900
                 focus:outline-none
@@ -119,7 +125,7 @@
             <button
               v-if="!insertingAccount"
               class="
-                ml-4
+                ms-4
                 text-xs text-gray-800
                 hover:text-gray-900
                 focus:outline-none
@@ -135,43 +141,110 @@
   </div>
 </template>
 <script>
-import { fyo } from 'src/initFyo';
 import { t } from 'fyo';
 import { isCredit } from 'models/helpers';
 import { ModelNameEnum } from 'models/types';
-import PageHeader from 'src/components/PageHeader';
+import PageHeader from 'src/components/PageHeader.vue';
+import { fyo } from 'src/initFyo';
 import { docsPathMap } from 'src/utils/misc';
-import { docsPath, openQuickEdit } from 'src/utils/ui';
+import { docsPathRef } from 'src/utils/refs';
+import { openQuickEdit } from 'src/utils/ui';
+import { getMapFromList, removeAtIndex } from 'utils/index';
 import { nextTick } from 'vue';
+import Button from '../components/Button.vue';
 import { handleErrorWithDialog } from '../errorHandling';
 
 export default {
   components: {
+    Button,
     PageHeader,
   },
   data() {
     return {
+      isAllCollapsed: true,
+      isAllExpanded: false,
       root: null,
       accounts: [],
       schemaName: 'Account',
       newAccountName: '',
       insertingAccount: false,
+      totals: {},
+      refetchTotals: false,
     };
+  },
+  inject: ['languageDirection'],
+  async mounted() {
+    await this.setTotalDebitAndCredit();
+    fyo.doc.observer.on('sync:AccountingLedgerEntry', () => {
+      this.refetchTotals = true;
+    });
   },
   async activated() {
     this.fetchAccounts();
     if (fyo.store.isDevelopment) {
       window.coa = this;
     }
-    docsPath.value = docsPathMap.ChartOfAccounts;
+
+    docsPathRef.value = docsPathMap.ChartOfAccounts;
+
+    if (this.refetchTotals) {
+      await this.setTotalDebitAndCredit();
+      this.refetchTotals = false;
+    }
   },
   deactivated() {
-    docsPath.value = '';
+    docsPathRef.value = '';
   },
   methods: {
+    async expand() {
+      await this.toggleAll(this.accounts, true);
+      this.isAllCollapsed = false;
+      this.isAllExpanded = true;
+    },
+    async collapse() {
+      await this.toggleAll(this.accounts, false);
+      this.isAllExpanded = false;
+      this.isAllCollapsed = true;
+    },
+    async toggleAll(accounts, expand) {
+      if (!Array.isArray(accounts)) {
+        await this.toggle(accounts, expand);
+        accounts = accounts.children ?? [];
+      }
+
+      for (const account of accounts) {
+        await this.toggleAll(account, expand);
+      }
+    },
+    async toggle(account, expand) {
+      if (account.expanded === expand || !account.isGroup) {
+        return;
+      }
+
+      await this.toggleChildren(account);
+    },
+    getBalance(account) {
+      const total = this.totals[account.name];
+      if (!total) {
+        return 0;
+      }
+
+      const { totalCredit, totalDebit } = total;
+
+      if (isCredit(account.rootType)) {
+        return totalCredit - totalDebit;
+      }
+
+      return totalDebit - totalCredit;
+    },
     getBalanceString(account) {
       const suffix = isCredit(account.rootType) ? t`Cr.` : t`Dr.`;
-      return `${fyo.format(account.balance, 'Currency')} ${suffix}`;
+      const balance = this.getBalance(account);
+      return `${fyo.format(balance, 'Currency')} ${suffix}`;
+    },
+    async setTotalDebitAndCredit() {
+      const totals = await this.fyo.db.getTotalCreditAndDebit();
+      this.totals = getMapFromList(totals, 'account');
     },
     async fetchAccounts() {
       this.settings = fyo.models[ModelNameEnum.Account].getTreeSettings(fyo);
@@ -189,17 +262,64 @@ export default {
         shouldOpen = !(await this.toggleChildren(account));
       }
 
+      if (account.isGroup && account.expanded) {
+        this.isAllCollapsed = false;
+      }
+
+      if (account.isGroup && !account.expanded) {
+        this.isAllExpanded = false;
+      }
+
       if (!shouldOpen) {
         return;
       }
 
-      await openQuickEdit({
-        schemaName: ModelNameEnum.Account,
-        name: account.name,
-      });
-
       const doc = await fyo.doc.getDoc(ModelNameEnum.Account, account.name);
-      doc.once('afterDelete', () => this.fetchAccounts());
+      this.setOpenAccountDocListener(doc, account);
+      await openQuickEdit({ doc });
+    },
+    setOpenAccountDocListener(doc, account, parentAccount) {
+      if (doc.hasListener('afterDelete')) {
+        return;
+      }
+
+      doc.once('afterDelete', () => {
+        this.removeAccount(doc.name, account, parentAccount);
+      });
+    },
+    removeAccount(name, account, parentAccount) {
+      if (account == null && parentAccount == null) {
+        return;
+      }
+
+      if (account == null) {
+        account = parentAccount.children.find((ch) => ch.name === name);
+      }
+
+      if (account == null) {
+        return;
+      }
+
+      const indices = account.location.slice(1).map((i) => Number(i));
+
+      let i = Number(account.location[0]);
+      let parent = this.accounts[i];
+      let children = this.accounts[i].children;
+
+      while (indices.length > 1) {
+        i = indices.shift();
+
+        parent = children[i];
+        children = children[i].children;
+      }
+
+      i = indices[0];
+
+      if (children[i].name !== name) {
+        return;
+      }
+
+      parent.children = removeAtIndex(children, i);
     },
     async toggleChildren(account) {
       const hasChildren = await this.fetchChildren(account);
@@ -227,14 +347,7 @@ export default {
         filters: {
           parentAccount: parent,
         },
-        fields: [
-          'name',
-          'parentAccount',
-          'isGroup',
-          'balance',
-          'rootType',
-          'accountType',
-        ],
+        fields: ['name', 'parentAccount', 'isGroup', 'rootType', 'accountType'],
         orderBy: 'name',
         order: 'asc',
       });
@@ -272,17 +385,17 @@ export default {
       this.insertingAccount = true;
 
       const accountName = this.newAccountName.trim();
-      let account = await fyo.doc.getNewDoc('Account');
+      const doc = await fyo.doc.getNewDoc('Account');
       try {
         let { name, rootType, accountType } = parentAccount;
-        await account.set({
+        await doc.set({
           name: accountName,
           parentAccount: name,
           rootType,
           accountType,
           isGroup,
         });
-        await account.sync();
+        await doc.sync();
 
         // turn off editing
         parentAccount.addingAccount = 0;
@@ -292,16 +405,16 @@ export default {
         await this.fetchChildren(parentAccount, true);
 
         // open quick edit
-        await openQuickEdit({
-          schemaName: 'Account',
-          name: account.name,
-        });
+        await openQuickEdit({ doc });
+        this.setOpenAccountDocListener(doc, null, parentAccount);
+
         // unfreeze input
         this.insertingAccount = false;
+        this.newAccountName = '';
       } catch (e) {
         // unfreeze input
         this.insertingAccount = false;
-        await handleErrorWithDialog(e, account);
+        await handleErrorWithDialog(e, doc);
       }
     },
     isQuickEditOpen(account) {
@@ -347,22 +460,48 @@ export default {
         template: icons[account.name] || icon,
       };
     },
+    getItemStyle(level) {
+      const styles = {
+        height: 'calc(var(--h-row-mid) + 1px)',
+      };
+      if (this.languageDirection === 'rtl') {
+        styles['padding-right'] = `calc(1rem + 2rem * ${level})`;
+      } else {
+        styles['padding-left'] = `calc(1rem + 2rem * ${level})`;
+      }
+      return styles;
+    },
+    getGroupStyle(level) {
+      const styles = {
+        height: 'height: calc(var(--h-row-mid) + 1px)',
+      };
+      if (this.languageDirection === 'rtl') {
+        styles['padding-right'] = `calc(1rem + 2rem * ${level})`;
+      } else {
+        styles['padding-left'] = `calc(1rem + 2rem * ${level})`;
+      }
+      return styles;
+    },
   },
   computed: {
     allAccounts() {
-      let allAccounts = [];
-      getAccounts(this.accounts, 0);
-      return allAccounts;
+      const allAccounts = [];
 
-      function getAccounts(accounts, level) {
-        for (let account of accounts) {
+      (function getAccounts(accounts, level, location) {
+        for (let i in accounts) {
+          const account = accounts[i];
+
           account.level = level;
+          account.location = [...location, i];
           allAccounts.push(account);
+
           if (account.children != null && account.expanded) {
-            getAccounts(account.children, level + 1);
+            getAccounts(account.children, level + 1, account.location);
           }
         }
-      }
+      })(this.accounts, 0, []);
+
+      return allAccounts;
     },
   },
 };
