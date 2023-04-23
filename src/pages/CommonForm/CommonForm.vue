@@ -1,15 +1,49 @@
 <template>
   <FormContainer>
     <template #header-left v-if="hasDoc">
-      <StatusBadge :status="status" class="h-8" />
+      <Barcode
+        class="h-8"
+        v-if="canShowBarcode"
+        @item-selected="(name:string) => {
+          // @ts-ignore
+          doc?.addItem(name);
+        }"
+      />
+      <ExchangeRate
+        v-if="canShowExchangeRate"
+        :disabled="doc?.isSubmitted || doc?.isCancelled"
+        :from-currency="fromCurrency"
+        :to-currency="toCurrency"
+        :exchange-rate="exchangeRate"
+        @change="
+          async (exchangeRate: number) =>
+            await doc.set('exchangeRate', exchangeRate)
+        "
+      />
+      <p
+        v-if="schema.label && !(canShowBarcode || canShowExchangeRate)"
+        class="text-xl font-semibold items-center text-gray-600"
+      >
+        {{ schema.label }}
+      </p>
     </template>
     <template #header v-if="hasDoc">
       <Button
-        v-if="!doc.isCancelled && !doc.dirty && isPrintable"
+        v-if="canShowLinks"
+        :icon="true"
+        @click="showLinks = true"
+        :title="t`View linked entries`"
+      >
+        <feather-icon name="link" class="w-4 h-4"></feather-icon>
+      </Button>
+      <Button
+        v-if="canPrint"
+        ref="printButton"
         :icon="true"
         @click="routeTo(`/print/${doc.schemaName}/${doc.name}`)"
+        :title="t`Open Print View`"
       >
-        {{ t`Print` }}
+        <feather-icon name="printer" class="w-4 h-4"></feather-icon>
       </Button>
       <DropdownWithActions
         v-for="group of groupedActions"
@@ -30,18 +64,15 @@
       }}</Button>
     </template>
     <template #body>
-      <FormHeader
-        :form-title="title"
-        :form-sub-title="schema.label"
-        class="sticky top-0 bg-white border-b"
-      >
+      <FormHeader :form-title="title" class="sticky top-0 bg-white border-b">
+        <StatusPill v-if="hasDoc" :doc="doc" />
       </FormHeader>
 
       <!-- Section Container -->
       <div v-if="hasDoc" class="overflow-auto custom-scroll">
         <CommonFormSection
           v-for="([name, fields], idx) in activeGroup.entries()"
-          @editrow="(doc: Doc) => toggleQuickEditDoc(doc)"
+          @editrow="(doc: Doc) => showRowEditForm(doc)"
           :key="name + idx"
           ref="section"
           class="p-4"
@@ -52,6 +83,7 @@
           :doc="doc"
           :errors="errors"
           @value-change="onValueChange"
+          @row-change="updateGroupedFields"
         />
       </div>
 
@@ -91,17 +123,21 @@
     </template>
     <template #quickedit>
       <Transition name="quickedit">
-        <QuickEditForm
-          v-if="hasQeDoc"
-          :name="qeDoc.name"
-          :show-name="false"
-          :show-save="false"
-          :source-doc="qeDoc"
-          :schema-name="qeDoc.schemaName"
-          :white="true"
-          :route-back="false"
-          :load-on-close="false"
-          @close="() => toggleQuickEditDoc(null)"
+        <LinkedEntries
+          v-if="showLinks && canShowLinks"
+          :doc="doc"
+          @close="showLinks = false"
+        />
+      </Transition>
+      <Transition name="quickedit">
+        <RowEditForm
+          v-if="row && !showLinks"
+          :doc="doc"
+          :fieldname="row.fieldname"
+          :index="row.index"
+          @previous="(i:number) => row!.index = i"
+          @next="(i:number) => row!.index = i"
+          @close="() => (row = null)"
         />
       </Transition>
     </template>
@@ -110,20 +146,23 @@
 <script lang="ts">
 import { DocValue } from 'fyo/core/types';
 import { Doc } from 'fyo/model/doc';
+import { DEFAULT_CURRENCY } from 'fyo/utils/consts';
 import { ValidationError } from 'fyo/utils/errors';
 import { getDocStatus } from 'models/helpers';
 import { ModelNameEnum } from 'models/types';
 import { Field, Schema } from 'schemas/types';
 import Button from 'src/components/Button.vue';
+import Barcode from 'src/components/Controls/Barcode.vue';
+import ExchangeRate from 'src/components/Controls/ExchangeRate.vue';
 import DropdownWithActions from 'src/components/DropdownWithActions.vue';
 import FormContainer from 'src/components/FormContainer.vue';
 import FormHeader from 'src/components/FormHeader.vue';
-import StatusBadge from 'src/components/StatusBadge.vue';
-import { handleErrorWithDialog } from 'src/errorHandling';
+import StatusPill from 'src/components/StatusPill.vue';
 import { getErrorMessage } from 'src/utils';
+import { shortcutsKey } from 'src/utils/injectionKeys';
 import { docsPathMap } from 'src/utils/misc';
-import { docsPathRef, focusedDocsRef } from 'src/utils/refs';
-import { ActionGroup, UIGroupedFields } from 'src/utils/types';
+import { docsPathRef } from 'src/utils/refs';
+import { ActionGroup, DocRef, UIGroupedFields } from 'src/utils/types';
 import {
   commonDocSubmit,
   commonDocSync,
@@ -133,37 +172,52 @@ import {
   isPrintable,
   routeTo,
 } from 'src/utils/ui';
-import { computed, defineComponent, nextTick } from 'vue';
-import QuickEditForm from '../QuickEditForm.vue';
+import { useDocShortcuts } from 'src/utils/vueUtils';
+import { computed, defineComponent, inject, nextTick, ref } from 'vue';
 import CommonFormSection from './CommonFormSection.vue';
+import LinkedEntries from './LinkedEntries.vue';
+import RowEditForm from './RowEditForm.vue';
 
 export default defineComponent({
   props: {
     name: { type: String, default: '' },
     schemaName: { type: String, default: ModelNameEnum.SalesInvoice },
   },
+  setup() {
+    const shortcuts = inject(shortcutsKey);
+    const docOrNull = ref(null) as DocRef;
+    let context = 'CommonForm';
+    if (shortcuts) {
+      context = useDocShortcuts(shortcuts, docOrNull, 'CommonForm', true);
+    }
+
+    return {
+      docOrNull,
+      shortcuts,
+      context,
+      printButton: ref<InstanceType<typeof Button> | null>(null),
+    };
+  },
   provide() {
     return {
-      schemaName: computed(() => this.docOrNull?.schemaName),
-      name: computed(() => this.docOrNull?.name),
       doc: computed(() => this.docOrNull),
     };
   },
   data() {
     return {
       errors: {},
-      docOrNull: null,
       activeTab: this.t`Default`,
       groupedFields: null,
-      quickEditDoc: null,
       isPrintable: false,
+      showLinks: false,
+      row: null,
     } as {
       errors: Record<string, string>;
-      docOrNull: null | Doc;
       activeTab: string;
       groupedFields: null | UIGroupedFields;
-      quickEditDoc: null | Doc;
       isPrintable: boolean;
+      showLinks: boolean;
+      row: null | { index: number; fieldname: string };
     };
   },
   async mounted() {
@@ -173,7 +227,6 @@ export default defineComponent({
     }
 
     await this.setDoc();
-    focusedDocsRef.add(this.docOrNull);
     this.updateGroupedFields();
     if (this.groupedFields) {
       this.activeTab = [...this.groupedFields.keys()][0];
@@ -182,20 +235,89 @@ export default defineComponent({
   },
   activated(): void {
     docsPathRef.value = docsPathMap[this.schemaName] ?? '';
-    focusedDocsRef.add(this.docOrNull);
+    this.shortcuts?.pmod.set(this.context, ['KeyP'], () => {
+      if (!this.canPrint) {
+        return;
+      }
+
+      this.printButton?.$el.click();
+    });
+    this.shortcuts?.pmod.set(this.context, ['KeyL'], () => {
+      if (!this.canShowLinks && !this.showLinks) {
+        return;
+      }
+
+      this.showLinks = !this.showLinks;
+    });
   },
   deactivated(): void {
     docsPathRef.value = '';
-    if (this.docOrNull) {
-      focusedDocsRef.delete(this.doc);
-    }
+    this.showLinks = false;
+    this.row = null;
   },
   computed: {
-    hasDoc(): boolean {
-      return !!this.docOrNull;
+    canShowBarcode(): boolean {
+      if (!this.fyo.singles.InventorySettings?.enableBarcodes) {
+        return false;
+      }
+
+      if (!this.hasDoc) {
+        return false;
+      }
+
+      if (this.doc.isSubmitted || this.doc.isCancelled) {
+        return false;
+      }
+
+      // @ts-ignore
+      return typeof this.doc?.addItem === 'function';
     },
-    hasQeDoc(): boolean {
-      return !!this.quickEditDoc;
+    canShowExchangeRate(): boolean {
+      return this.hasDoc && !!this.doc.isMultiCurrency;
+    },
+    exchangeRate(): number {
+      if (!this.hasDoc || typeof this.doc.exchangeRate !== 'number') {
+        return 1;
+      }
+
+      return this.doc.exchangeRate;
+    },
+    fromCurrency(): string {
+      const currency = this.doc?.currency;
+      if (typeof currency !== 'string') {
+        return this.toCurrency;
+      }
+
+      return currency;
+    },
+    toCurrency(): string {
+      const currency = this.fyo.singles.SystemSettings?.currency;
+      if (typeof currency !== 'string') {
+        return DEFAULT_CURRENCY;
+      }
+
+      return currency;
+    },
+    canPrint(): boolean {
+      if (!this.hasDoc) {
+        return false;
+      }
+
+      return !this.doc.isCancelled && !this.doc.dirty && this.isPrintable;
+    },
+    canShowLinks(): boolean {
+      if (!this.hasDoc) {
+        return false;
+      }
+
+      if (this.doc.schema.isSubmittable && !this.doc.isSubmitted) {
+        return false;
+      }
+
+      return this.doc.inserted;
+    },
+    hasDoc(): boolean {
+      return this.docOrNull instanceof Doc;
     },
     status(): string {
       if (!this.hasDoc) {
@@ -206,15 +328,6 @@ export default defineComponent({
     },
     doc(): Doc {
       const doc = this.docOrNull as Doc | null;
-      if (!doc) {
-        throw new ValidationError(
-          this.t`Doc ${this.schema.label} ${this.name} not set`
-        );
-      }
-      return doc;
-    },
-    qeDoc(): Doc {
-      const doc = this.quickEditDoc as Doc | null;
       if (!doc) {
         throw new ValidationError(
           this.t`Doc ${this.schema.label} ${this.name} not set`
@@ -244,9 +357,8 @@ export default defineComponent({
 
       const group = this.groupedFields.get(this.activeTab);
       if (!group) {
-        throw new ValidationError(
-          `Tab group ${this.activeTab} has no value set`
-        );
+        const tab = [...this.groupedFields.keys()][0];
+        return this.groupedFields.get(tab) ?? new Map();
       }
 
       return group;
@@ -271,8 +383,8 @@ export default defineComponent({
         this.doc
       );
     },
-    async sync() {
-      if (await commonDocSync(this.doc)) {
+    async sync(useDialog?: boolean) {
+      if (await commonDocSync(this.doc, useDialog)) {
         this.updateGroupedFields();
       }
     },
@@ -291,13 +403,18 @@ export default defineComponent({
         this.name
       );
     },
-    async toggleQuickEditDoc(doc: Doc | null) {
-      if (this.quickEditDoc && doc) {
-        this.quickEditDoc = null;
+    async showRowEditForm(doc: Doc) {
+      if (this.showLinks) {
+        this.showLinks = false;
         await nextTick();
       }
 
-      this.quickEditDoc = doc;
+      const index = doc.idx;
+      const fieldname = doc.parentFieldname;
+
+      if (typeof index === 'number' && typeof fieldname === 'string') {
+        this.row = { index, fieldname };
+      }
     },
     async onValueChange(field: Field, value: DocValue) {
       const { fieldname } = field;
@@ -320,10 +437,13 @@ export default defineComponent({
     FormContainer,
     FormHeader,
     CommonFormSection,
-    StatusBadge,
     Button,
     DropdownWithActions,
-    QuickEditForm,
+    Barcode,
+    ExchangeRate,
+    LinkedEntries,
+    RowEditForm,
+    StatusPill,
   },
 });
 </script>

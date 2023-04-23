@@ -107,6 +107,12 @@ export class DocHandler {
     return doc;
   }
 
+  isTemporaryName(name: string, schema: Schema): boolean {
+    const label = schema.label ?? schema.name;
+    const template = this.fyo.t`New ${label} `;
+    return name.includes(template);
+  }
+
   getTemporaryName(schema: Schema): string {
     if (schema.naming === 'random') {
       return getRandomString();
@@ -116,11 +122,9 @@ export class DocHandler {
 
     const idx = this.#temporaryNameCounters[schema.name];
     this.#temporaryNameCounters[schema.name] = idx + 1;
+    const label = schema.label ?? schema.name;
 
-    return this.fyo.t`New ${schema.label ?? schema.name} ${String(idx).padStart(
-      2,
-      '0'
-    )}`;
+    return this.fyo.t`New ${label} ${String(idx).padStart(2, '0')}`;
   }
 
   /**
@@ -153,18 +157,18 @@ export class DocHandler {
     });
 
     doc.on('afterSync', () => {
-      if (doc.name === name) {
+      if (doc.name === name && this.#cacheHas(schemaName, name)) {
         return;
       }
 
-      this.#removeFromCache(doc.schemaName, name);
+      this.removeFromCache(doc.schemaName, name);
       this.#addToCache(doc);
     });
   }
 
   #setCacheUpdationListeners(schemaName: string) {
     this.fyo.db.observer.on(`delete:${schemaName}`, (name: string) => {
-      this.#removeFromCache(schemaName, name);
+      this.removeFromCache(schemaName, name);
     });
 
     this.fyo.db.observer.on(
@@ -175,13 +179,13 @@ export class DocHandler {
           return;
         }
 
-        this.#removeFromCache(schemaName, names.oldName);
+        this.removeFromCache(schemaName, names.oldName);
         this.#addToCache(doc);
       }
     );
   }
 
-  #removeFromCache(schemaName: string, name: string) {
+  removeFromCache(schemaName: string, name: string) {
     const docMap = this.docs.get(schemaName);
     delete docMap?.[name];
   }
@@ -189,5 +193,9 @@ export class DocHandler {
   #getFromCache(schemaName: string, name: string): Doc | undefined {
     const docMap = this.docs.get(schemaName);
     return docMap?.[name];
+  }
+
+  #cacheHas(schemaName: string, name: string): boolean {
+    return !!this.#getFromCache(schemaName, name);
   }
 }

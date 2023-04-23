@@ -10,10 +10,13 @@
       <div
         v-if="!showSidebar && platform === 'Mac' && languageDirection !== 'rtl'"
         class="h-full"
-        :class="showSidebar ? '' : 'w-tl me-4 border-e'"
+        :class="spacerClass"
       />
     </Transition>
-    <h1 class="text-xl font-semibold select-none" v-if="title">
+    <h1
+      class="text-xl font-semibold select-none whitespace-nowrap"
+      v-if="title"
+    >
       {{ title }}
     </h1>
     <div class="flex items-stretch window-no-drag gap-2">
@@ -30,14 +33,14 @@
     </div>
   </div>
 </template>
-<script>
+<script lang="ts">
+import { languageDirectionKey } from 'src/utils/injectionKeys';
 import { showSidebar } from 'src/utils/refs';
-import { Transition } from 'vue';
+import { defineComponent, inject, Transition } from 'vue';
 import BackLink from './BackLink.vue';
 import SearchBar from './SearchBar.vue';
 
-export default {
-  inject: ['languageDirection'],
+export default defineComponent({
   props: {
     title: { type: String, default: '' },
     backLink: { type: Boolean, default: true },
@@ -45,16 +48,27 @@ export default {
     border: { type: Boolean, default: true },
     searchborder: { type: Boolean, default: true },
   },
-  components: { SearchBar, BackLink, Transition },
+  components: { BackLink, SearchBar, Transition },
   setup() {
-    return { showSidebar };
+    return { showSidebar, languageDirection: inject(languageDirectionKey) };
   },
   computed: {
     showBorder() {
       return !!this.$slots.default && this.searchborder;
     },
+    spacerClass() {
+      if (this.showSidebar) {
+        return '';
+      }
+
+      if (this.border) {
+        return 'w-tl me-4 border-e';
+      }
+
+      return 'w-tl me-4';
+    },
   },
-};
+});
 </script>
 <style scoped>
 .w-tl {

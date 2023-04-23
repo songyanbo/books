@@ -5,6 +5,20 @@ import { validateEmail } from 'fyo/model/validationFunction';
 import { DateTime } from 'luxon';
 import { getCountryInfo, getFiscalYear } from 'utils/misc';
 
+function getCurrencyList(): { countryCode: string; name: string }[] {
+  const result: { countryCode: string; name: string }[] = [];
+  const countryInfo = getCountryInfo();
+  for (const info of Object.values(countryInfo)) {
+    const { currency, code } = info ?? {};
+    if (typeof currency !== 'string' || typeof code !== 'string') {
+      continue;
+    }
+
+    result.push({ name: currency, countryCode: code });
+  }
+  return result;
+}
+
 export function getCOAList() {
   return [
     { name: t`Standard Chart of Accounts`, countryCode: '' },
@@ -96,11 +110,27 @@ export class SetupWizard extends Doc {
     },
     currency: {
       formula: async () => {
-        if (!this.country) {
+        const country = this.get('country');
+        if (typeof country !== 'string') {
           return;
         }
+
         const countryInfo = getCountryInfo();
-        return countryInfo[this.country as string]?.currency;
+        const { code } = countryInfo[country] ?? {};
+        if (!code) {
+          return;
+        }
+
+        const currencyList = getCurrencyList();
+        const currency = currencyList.find(
+          ({ countryCode }) => countryCode === code
+        );
+
+        if (currency === undefined) {
+          return currencyList[0].name;
+        }
+
+        return currency.name;
       },
       dependsOn: ['country'],
     },
@@ -112,19 +142,13 @@ export class SetupWizard extends Doc {
         }
 
         const countryInfo = getCountryInfo();
-        const code = (countryInfo[country] as undefined | { code: string })
-          ?.code;
-        if (code === undefined) {
+        const code = countryInfo[country]?.code;
+        if (!code) {
           return;
         }
-
         const coaList = getCOAList();
         const coa = coaList.find(({ countryCode }) => countryCode === code);
-
-        if (coa === undefined) {
-          return coaList[0].name;
-        }
-        return coa.name;
+        return coa?.name ?? coaList[0].name;
       },
       dependsOn: ['country'],
     },
@@ -136,6 +160,7 @@ export class SetupWizard extends Doc {
 
   static lists: ListsMap = {
     country: () => Object.keys(getCountryInfo()),
+    currency: () => getCurrencyList().map(({ name }) => name),
     chartOfAccounts: () => getCOAList().map(({ name }) => name),
   };
 }

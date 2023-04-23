@@ -758,6 +758,10 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
   }
 
+  async runFormulas() {
+    await this._applyFormula();
+  }
+
   async _applyFormula(
     changedFieldname?: string,
     retriggerChildDocApplyChange?: boolean
@@ -915,6 +919,10 @@ export class Doc extends Observable<DocValue | Doc[]> {
   }
 
   async delete() {
+    if (this.notInserted && this.name) {
+      this.fyo.doc.removeFromCache(this.schemaName, this.name);
+    }
+
     if (!this.canDelete) {
       return;
     }

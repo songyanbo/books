@@ -9,7 +9,7 @@
       class="text-end"
       :class="[inputClasses, containerClasses]"
       :type="inputType"
-      :value="value?.round()"
+      :value="round(value)"
       :placeholder="inputPlaceholder"
       :readonly="isReadOnly"
       :tabindex="isReadOnly ? '-1' : '0'"
@@ -29,13 +29,15 @@
     </div>
   </div>
 </template>
-
-<script>
+<script lang="ts">
+import { isPesa } from 'fyo/utils';
+import { Money } from 'pesa';
 import { fyo } from 'src/initFyo';
-import { nextTick } from 'vue';
+import { safeParsePesa } from 'utils/index';
+import { defineComponent, nextTick } from 'vue';
 import Float from './Float.vue';
 
-export default {
+export default defineComponent({
   name: 'Currency',
   extends: Float,
   emits: ['input', 'focus'],
@@ -46,22 +48,38 @@ export default {
     };
   },
   methods: {
-    onFocus(e) {
-      e.target.select();
+    onFocus(e: FocusEvent) {
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+
+      target.select();
       this.showInput = true;
       this.$emit('focus', e);
     },
-    parse(value) {
-      return fyo.pesa(value);
+    round(v: unknown) {
+      if (!isPesa(v)) {
+        v = this.parse(v);
+      }
+
+      if (isPesa(v)) {
+        return v.round();
+      }
+
+      return fyo.pesa(0).round();
     },
-    onBlur(e) {
-      let { value } = e.target;
-      if (value !== 0 && !value) {
-        value = fyo.pesa(0).round();
+    parse(value: unknown): Money {
+      return safeParsePesa(value, this.fyo);
+    },
+    onBlur(e: FocusEvent) {
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
       }
 
       this.showInput = false;
-      this.triggerChange(value);
+      this.triggerChange(target.value);
     },
     activateInput() {
       if (this.isReadOnly) {
@@ -76,8 +94,9 @@ export default {
   },
   computed: {
     formattedValue() {
-      return fyo.format(this.value ?? fyo.pesa(0), this.df, this.doc);
+      const value = this.parse(this.value);
+      return fyo.format(value, this.df, this.doc);
     },
   },
-};
+});
 </script>

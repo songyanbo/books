@@ -212,7 +212,7 @@
     </Modal>
   </div>
 </template>
-<script>
+<script lang="ts">
 import { setupDummyInstance } from 'dummy';
 import { ipcRenderer } from 'electron';
 import { t } from 'fyo';
@@ -223,12 +223,14 @@ import FeatherIcon from 'src/components/FeatherIcon.vue';
 import Loading from 'src/components/Loading.vue';
 import Modal from 'src/components/Modal.vue';
 import { fyo } from 'src/initFyo';
+import { showDialog } from 'src/utils/interactive';
 import { deleteDb, getSavePath } from 'src/utils/ipcCalls';
 import { updateConfigFiles } from 'src/utils/misc';
-import { showMessageDialog } from 'src/utils/ui';
 import { IPC_ACTIONS } from 'utils/messages';
+import type { ConfigFilesWithModified } from 'utils/types';
+import { defineComponent } from 'vue';
 
-export default {
+export default defineComponent({
   name: 'DatabaseSelector',
   emits: ['file-selected'],
   data() {
@@ -240,33 +242,43 @@ export default {
       creatingDemo: false,
       loadingDatabase: false,
       files: [],
+    } as {
+      openModal: boolean;
+      baseCount: number;
+      creationMessage: string;
+      creationPercent: number;
+      creatingDemo: boolean;
+      loadingDatabase: boolean;
+      files: ConfigFilesWithModified[];
     };
   },
   async mounted() {
     await this.setFiles();
 
     if (fyo.store.isDevelopment) {
+      // @ts-ignore
       window.ds = this;
     }
   },
   methods: {
-    truncate(value) {
+    truncate(value: string) {
       if (value.length < 72) {
         return value;
       }
 
       return '...' + value.slice(value.length - 72);
     },
-    formatDate(isoDate) {
+    formatDate(isoDate: string) {
       return DateTime.fromISO(isoDate).toRelative();
     },
-    async deleteDb(i) {
+    async deleteDb(i: number) {
       const file = this.files[i];
       const vm = this;
 
-      await showMessageDialog({
-        message: t`Delete ${file.companyName}?`,
+      await showDialog({
+        title: t`Delete ${file.companyName}?`,
         detail: t`Database file: ${file.dbPath}`,
+        type: 'warning',
         buttons: [
           {
             label: this.t`Yes`,
@@ -274,10 +286,12 @@ export default {
               await deleteDb(file.dbPath);
               await vm.setFiles();
             },
+            isPrimary: true,
           },
           {
             label: this.t`No`,
             action() {},
+            isEscape: true,
           },
         ],
       });
@@ -314,7 +328,11 @@ export default {
       this.creatingDemo = false;
     },
     async setFiles() {
-      this.files = (await ipcRenderer.invoke(IPC_ACTIONS.GET_DB_LIST))?.sort(
+      const dbList: ConfigFilesWithModified[] = await ipcRenderer.invoke(
+        IPC_ACTIONS.GET_DB_LIST
+      );
+
+      this.files = dbList?.sort(
         (a, b) => Date.parse(b.modified) - Date.parse(a.modified)
       );
     },
@@ -328,7 +346,7 @@ export default {
         return;
       }
 
-      this.connectToDatabase(filePath, true);
+      this.emitFileSelected(filePath, true);
     },
     async existingDatabase() {
       if (this.creatingDemo) {
@@ -342,16 +360,16 @@ export default {
           filters: [{ name: 'SQLite DB File', extensions: ['db'] }],
         })
       )?.filePaths?.[0];
-      this.connectToDatabase(filePath);
+      this.emitFileSelected(filePath);
     },
-    async selectFile(file) {
+    async selectFile(file: ConfigFilesWithModified) {
       if (this.creatingDemo) {
         return;
       }
 
-      await this.connectToDatabase(file.dbPath);
+      await this.emitFileSelected(file.dbPath);
     },
-    async connectToDatabase(filePath, isNew) {
+    async emitFileSelected(filePath: string, isNew?: boolean) {
       if (!filePath) {
         return;
       }
@@ -371,5 +389,5 @@ export default {
     Modal,
     Button,
   },
-};
+});
 </script>

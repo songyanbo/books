@@ -1,3 +1,6 @@
+import type { Fyo } from 'fyo';
+import { Money } from 'pesa';
+
 /**
  * And so should not contain and platforma specific imports.
  */
@@ -180,11 +183,35 @@ function safeParseNumber(value: unknown, parser: (v: string) => number) {
 }
 
 export function safeParseFloat(value: unknown): number {
-  return safeParseNumber(value, parseFloat);
+  return safeParseNumber(value, Number);
 }
 
 export function safeParseInt(value: unknown): number {
-  return safeParseNumber(value, parseInt);
+  return safeParseNumber(value, (v: string) => Math.trunc(Number(v)));
+}
+
+export function safeParsePesa(value: unknown, fyo: Fyo): Money {
+  if (value instanceof Money) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return fyo.pesa(value);
+  }
+
+  if (typeof value === 'bigint') {
+    return fyo.pesa(value);
+  }
+
+  if (typeof value !== 'string') {
+    return fyo.pesa(0);
+  }
+
+  try {
+    return fyo.pesa(value);
+  } catch {
+    return fyo.pesa(0);
+  }
 }
 
 export function joinMapLists<A, B>(

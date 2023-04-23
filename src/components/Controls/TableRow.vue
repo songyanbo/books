@@ -1,16 +1,8 @@
 <template>
   <Row
     :ratio="ratio"
-    class="
-      w-full
-      px-2
-      hover:bg-gray-25
-      group
-      flex
-      items-center
-      justify-center
-      h-row-mid
-    "
+    class="w-full px-2 group flex items-center justify-center h-row-mid"
+    :class="readOnly ? '' : 'hover:bg-gray-25'"
   >
     <!-- Index or Remove button -->
     <div class="flex items-center ps-2 text-gray-600">
@@ -35,7 +27,6 @@
       :df="df"
       :value="row[df.fieldname]"
       @change="(value) => onChange(df, value)"
-      @new-doc="(doc) => row.set(df.fieldname, doc.name)"
     />
     <Button
       :icon="true"
@@ -61,7 +52,7 @@
 import { Doc } from 'fyo/model/doc';
 import Row from 'src/components/Row.vue';
 import { getErrorMessage } from 'src/utils';
-import { nextTick } from 'vue';
+import { computed, nextTick } from 'vue';
 import Button from '../Button.vue';
 import FormControl from './FormControl.vue';
 
@@ -79,7 +70,7 @@ export default {
       default: false,
     },
   },
-  emits: ['remove'],
+  emits: ['remove', 'change'],
   components: {
     Row,
     FormControl,
@@ -91,9 +82,7 @@ export default {
   },
   provide() {
     return {
-      schemaName: this.row.schemaName,
-      name: this.row.name,
-      doc: this.row,
+      doc: computed(() => this.row),
     };
   },
   computed: {
@@ -109,6 +98,7 @@ export default {
 
       try {
         await this.row.set(fieldname, value);
+        this.$emit('change', df, value);
       } catch (e) {
         this.errors[fieldname] = getErrorMessage(e, this.row);
         this.row[fieldname] = '';

@@ -11,6 +11,7 @@ import { ValidationError } from 'fyo/utils/errors';
 import { ModelNameEnum } from 'models/types';
 import { Money } from 'pesa';
 import { safeParseFloat } from 'utils/index';
+import { StockTransfer } from './StockTransfer';
 
 export class StockTransferItem extends Doc {
   item?: string;
@@ -27,6 +28,12 @@ export class StockTransferItem extends Doc {
   description?: string;
   hsnCode?: number;
   batch?: string;
+
+  parentdoc?: StockTransfer;
+
+  get isSales() {
+    return this.schemaName === ModelNameEnum.ShipmentItem;
+  }
 
   formulas: FormulaMap = {
     description: {

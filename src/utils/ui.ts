@@ -2,12 +2,13 @@
  * Utils to do UI stuff such as opening dialogs, toasts, etc.
  * Basically anything that may directly or indirectly import a Vue file.
  */
-import { ipcRenderer } from 'electron';
 import { t } from 'fyo';
 import type { Doc } from 'fyo/model/doc';
 import { Action } from 'fyo/model/types';
 import { getActions } from 'fyo/utils';
 import { getDbError, LinkValidationError, ValueError } from 'fyo/utils/errors';
+import { PurchaseInvoice } from 'models/baseModels/PurchaseInvoice/PurchaseInvoice';
+import { SalesInvoice } from 'models/baseModels/SalesInvoice/SalesInvoice';
 import { getLedgerLink } from 'models/helpers';
 import { Transfer } from 'models/inventory/Transfer';
 import { Transactional } from 'models/Transactional/Transactional';
@@ -16,135 +17,45 @@ import { Schema } from 'schemas/types';
 import { handleErrorWithDialog } from 'src/errorHandling';
 import { fyo } from 'src/initFyo';
 import router from 'src/router';
-import { IPC_ACTIONS } from 'utils/messages';
 import { SelectFileOptions } from 'utils/types';
-import { App, createApp, h } from 'vue';
 import { RouteLocationRaw } from 'vue-router';
-import { stringifyCircular } from './';
 import { evaluateHidden } from './doc';
+import { showDialog, showToast } from './interactive';
 import { selectFile } from './ipcCalls';
 import { showSidebar } from './refs';
 import {
   ActionGroup,
-  MessageDialogOptions,
+  DialogButton,
   QuickEditOptions,
   SettingsTab,
   ToastOptions,
   UIGroupedFields,
 } from './types';
 
+export const toastDurationMap = { short: 2_500, long: 5_000 } as const;
+
 export async function openQuickEdit({
   doc,
-  schemaName,
-  name,
   hideFields = [],
   showFields = [],
-  defaults = {},
-  listFilters = {},
 }: QuickEditOptions) {
-  if (doc) {
-    schemaName = doc.schemaName;
-    name = doc.name;
+  const { schemaName, name } = doc;
+  if (!name) {
+    throw new ValueError(t`Quick edit error: ${schemaName} entry has no name.`);
   }
 
-  if (!doc && (!schemaName || !name)) {
-    throw new ValueError(t`Schema Name or Name not passed to Open Quick Edit`);
-  }
-
-  const currentRoute = router.currentRoute.value;
-  const query = currentRoute.query;
-  let method: 'push' | 'replace' = 'push';
-
-  if (query.edit && query.schemaName === schemaName) {
-    method = 'replace';
-  }
-
-  if (query.name === name) {
+  if (router.currentRoute.value.query.name === name) {
     return;
   }
 
-  const forWhat = (defaults?.for ?? []) as string[];
-  if (forWhat[0] === 'not in') {
-    const purpose = forWhat[1]?.[0];
-
-    defaults = Object.assign({
-      for:
-        purpose === 'Sales'
-          ? 'Purchases'
-          : purpose === 'Purchases'
-          ? 'Sales'
-          : 'Both',
-    });
-  }
-
-  if (forWhat[0] === 'not in' && forWhat[1] === 'Sales') {
-    defaults = Object.assign({ for: 'Purchases' });
-  }
-
-  router[method]({
-    query: {
-      edit: 1,
-      schemaName,
-      name,
-      showFields,
-      hideFields,
-      defaults: stringifyCircular(defaults),
-      filters: JSON.stringify(listFilters),
-    },
-  });
-}
-
-// @ts-ignore
-window.openqe = openQuickEdit;
-
-export async function showMessageDialog({
-  message,
-  detail,
-  buttons = [],
-}: MessageDialogOptions) {
-  const options = {
-    message,
-    detail,
-    buttons: buttons.map((a) => a.label),
+  const query = {
+    edit: 1,
+    name,
+    schemaName,
+    showFields,
+    hideFields,
   };
-
-  const { response } = (await ipcRenderer.invoke(
-    IPC_ACTIONS.GET_DIALOG_RESPONSE,
-    options
-  )) as { response: number };
-
-  const button = buttons[response];
-  if (!button?.action) {
-    return null;
-  }
-
-  return await button.action();
-}
-
-export async function showToast(options: ToastOptions) {
-  const Toast = (await import('src/components/Toast.vue')).default;
-  const toast = createApp({
-    render() {
-      return h(Toast, { ...options });
-    },
-  });
-  replaceAndAppendMount(toast, 'toast-target');
-}
-
-function replaceAndAppendMount(app: App<Element>, replaceId: string) {
-  const fragment = document.createDocumentFragment();
-  const target = document.getElementById(replaceId);
-  if (target === null) {
-    return;
-  }
-
-  const parent = target.parentElement;
-  const clone = target.cloneNode();
-
-  // @ts-ignore
-  app.mount(fragment);
-  target.replaceWith(fragment);
-  parent!.append(clone);
+  router.push({ query });
 }
 
 export async function openSettings(tab: SettingsTab) {
@@ -169,21 +80,22 @@ export async function deleteDocWithPrompt(doc: Doc) {
     detail = t`This action is permanent and will delete associated ledger entries.`;
   }
 
-  return await showMessageDialog({
-    message: t`Delete ${schemaLabel} ${doc.name!}?`,
+  return await showDialog({
+    title: t`Delete ${getActionLabel(doc)}?`,
     detail,
+    type: 'warning',
     buttons: [
       {
-        label: t`Delete`,
+        label: t`Yes`,
         async action() {
           try {
             await doc.delete();
-            return true;
           } catch (err) {
             if (getDbError(err as Error) === LinkValidationError) {
-              showMessageDialog({
-                message: t`Delete Failed`,
-                detail: t`Cannot delete ${schemaLabel} ${doc.name!} because of linked entries.`,
+              showDialog({
+                title: t`Delete Failed`,
+                detail: t`Cannot delete ${schemaLabel} "${doc.name!}" because of linked entries.`,
+                type: 'error',
               });
             } else {
               handleErrorWithDialog(err as Error, doc);
@@ -191,13 +103,17 @@ export async function deleteDocWithPrompt(doc: Doc) {
 
             return false;
           }
+
+          return true;
         },
+        isPrimary: true,
       },
       {
-        label: t`Cancel`,
+        label: t`No`,
         action() {
           return false;
         },
+        isEscape: true,
       },
     ],
   });
@@ -235,28 +151,31 @@ export async function cancelDocWithPrompt(doc: Doc) {
     }
   }
 
-  const schemaLabel = fyo.schemaMap[doc.schemaName]!.label;
-  return await showMessageDialog({
-    message: t`Cancel ${schemaLabel} ${doc.name!}?`,
+  return await showDialog({
+    title: t`Cancel ${getActionLabel(doc)}?`,
     detail,
+    type: 'warning',
     buttons: [
       {
         label: t`Yes`,
         async action() {
           try {
             await doc.cancel();
-            return true;
           } catch (err) {
             handleErrorWithDialog(err as Error, doc);
             return false;
           }
+
+          return true;
         },
+        isPrimary: true,
       },
       {
         label: t`No`,
         action() {
           return false;
         },
+        isEscape: true,
       },
     ],
   });
@@ -318,12 +237,7 @@ function getCancelAction(doc: Doc): Action {
     },
     condition: (doc: Doc) => doc.canCancel,
     async action() {
-      const res = await cancelDocWithPrompt(doc);
-      if (!res) {
-        return;
-      }
-
-      showActionToast(doc, 'cancel');
+      await commonDocCancel(doc);
     },
   };
 }
@@ -336,13 +250,7 @@ function getDeleteAction(doc: Doc): Action {
     },
     condition: (doc: Doc) => doc.canDelete,
     async action() {
-      const res = await deleteDocWithPrompt(doc);
-      if (!res) {
-        return;
-      }
-
-      showActionToast(doc, 'delete');
-      router.back();
+      await commongDocDelete(doc);
     },
   };
 }
@@ -383,7 +291,7 @@ export function getFieldsGroupedByTabAndSection(
 ): UIGroupedFields {
   const grouped: UIGroupedFields = new Map();
   for (const field of schema?.fields ?? []) {
-    const tab = field.tab ?? 'Default';
+    const tab = field.tab ?? 'Main';
     const section = field.section ?? 'Default';
     if (!grouped.has(tab)) {
       grouped.set(tab, new Map());
@@ -405,6 +313,26 @@ export function getFieldsGroupedByTabAndSection(
     tabbed.get(section)!.push(field);
   }
 
+  // Delete empty tabs and sections
+  for (const tkey of grouped.keys()) {
+    const section = grouped.get(tkey);
+    if (!section) {
+      grouped.delete(tkey);
+      continue;
+    }
+
+    for (const skey of section.keys()) {
+      const fields = section.get(skey);
+      if (!fields || !fields.length) {
+        section.delete(skey);
+      }
+    }
+
+    if (!section?.size) {
+      grouped.delete(tkey);
+    }
+  }
+
   return grouped;
 }
 
@@ -420,22 +348,7 @@ export function getFormRoute(
     return route;
   }
 
-  if (
-    [
-      ModelNameEnum.SalesInvoice,
-      ModelNameEnum.PurchaseInvoice,
-      ModelNameEnum.JournalEntry,
-      ModelNameEnum.Shipment,
-      ModelNameEnum.PurchaseReceipt,
-      ModelNameEnum.StockMovement,
-      ModelNameEnum.Payment,
-      ModelNameEnum.Item,
-    ].includes(schemaName as ModelNameEnum)
-  ) {
-    return `/edit/${schemaName}/${name}`;
-  }
-
-  return `/list/${schemaName}?edit=1&schemaName=${schemaName}&name=${name}`;
+  return `/edit/${schemaName}/${name}`;
 }
 
 export async function getDocFromNameIfExistsElseNew(
@@ -473,8 +386,16 @@ export function focusOrSelectFormControl(
   ref: any,
   clear: boolean = true
 ) {
+  if (!doc?.fyo) {
+    return;
+  }
+
   const naming = doc.fyo.schemaMap[doc.schemaName]?.naming;
   if (naming !== 'manual' || doc.inserted) {
+    return;
+  }
+
+  if (!doc.fyo.doc.isTemporaryName(doc.name ?? '', doc.schema)) {
     return;
   }
 
@@ -561,11 +482,39 @@ export function getShortcutKeyMap(
   };
 }
 
-export async function commonDocSync(doc: Doc): Promise<boolean> {
-  try {
-    await doc.sync();
-  } catch (error) {
-    handleErrorWithDialog(error, doc);
+export async function commongDocDelete(doc: Doc): Promise<boolean> {
+  const res = await deleteDocWithPrompt(doc);
+  if (!res) {
+    return false;
+  }
+
+  showActionToast(doc, 'delete');
+  router.back();
+  return true;
+}
+
+export async function commonDocCancel(doc: Doc): Promise<boolean> {
+  const res = await cancelDocWithPrompt(doc);
+  if (!res) {
+    return false;
+  }
+
+  showActionToast(doc, 'cancel');
+  return true;
+}
+
+export async function commonDocSync(
+  doc: Doc,
+  useDialog: boolean = false
+): Promise<boolean> {
+  let success: boolean;
+  if (useDialog) {
+    success = !!(await showSubmitOrSyncDialog(doc, 'sync'));
+  } else {
+    success = await syncWithoutDialog(doc);
+  }
+
+  if (!success) {
     return false;
   }
 
@@ -573,8 +522,19 @@ export async function commonDocSync(doc: Doc): Promise<boolean> {
   return true;
 }
 
+async function syncWithoutDialog(doc: Doc): Promise<boolean> {
+  try {
+    await doc.sync();
+  } catch (error) {
+    handleErrorWithDialog(error, doc);
+    return false;
+  }
+
+  return true;
+}
+
 export async function commonDocSubmit(doc: Doc): Promise<boolean> {
-  const success = await showSubmitDialog(doc);
+  const success = await showSubmitOrSyncDialog(doc, 'submit');
   if (!success) {
     return false;
   }
@@ -583,12 +543,21 @@ export async function commonDocSubmit(doc: Doc): Promise<boolean> {
   return true;
 }
 
-async function showSubmitDialog(doc: Doc) {
-  const label = doc.schema.label ?? doc.schemaName;
-  const message = t`Submit ${label}?`;
+async function showSubmitOrSyncDialog(doc: Doc, type: 'submit' | 'sync') {
+  const label = getActionLabel(doc);
+  let title = t`Submit ${label}?`;
+  if (type === 'sync') {
+    title = t`Save ${label}?`;
+  }
+
+  let detail = t`Save ${doc.schema.label} to database.`;
+  if (type === 'submit') {
+    detail = getDocSubmitMessage(doc);
+  }
+
   const yesAction = async () => {
     try {
-      await doc.submit();
+      await doc[type]();
     } catch (error) {
       handleErrorWithDialog(error, doc);
       return false;
@@ -597,53 +566,71 @@ async function showSubmitDialog(doc: Doc) {
     return true;
   };
 
-  const buttons = [
+  const buttons: DialogButton[] = [
     {
       label: t`Yes`,
       action: yesAction,
+      isPrimary: true,
     },
     {
       label: t`No`,
       action: () => false,
+      isEscape: true,
     },
   ];
 
-  return await showMessageDialog({
-    message,
+  return await showDialog({
+    title,
+    detail,
     buttons,
   });
 }
 
+function getDocSubmitMessage(doc: Doc): string {
+  const details = [t`Mark ${doc.schema.label} as submitted?`];
+
+  if (doc instanceof SalesInvoice && doc.makeAutoPayment) {
+    const toAccount = doc.autoPaymentAccount!;
+    const fromAccount = doc.account!;
+    const amount = fyo.format(doc.outstandingAmount, 'Currency');
+
+    details.push(
+      t`Payment of ${amount} will be made from account "${fromAccount}" to account "${toAccount}" on Submit.`
+    );
+  } else if (doc instanceof PurchaseInvoice && doc.makeAutoPayment) {
+    const fromAccount = doc.autoPaymentAccount!;
+    const toAccount = doc.account!;
+    const amount = fyo.format(doc.outstandingAmount, 'Currency');
+
+    details.push(
+      t`Payment of ${amount} will be made from account "${fromAccount}" to account "${toAccount}" on Submit.`
+    );
+  }
+
+  return details.join(' ');
+}
+
 function showActionToast(doc: Doc, type: 'sync' | 'cancel' | 'delete') {
-  const label = getToastLabel(doc);
+  const label = getActionLabel(doc);
   const message = {
     sync: t`${label} saved`,
     cancel: t`${label} cancelled`,
     delete: t`${label} deleted`,
   }[type];
 
-  showToast({ type: 'success', message, duration: 2500 });
+  showToast({ type: 'success', message, duration: 'short' });
 }
 
 function showSubmitToast(doc: Doc) {
-  const label = getToastLabel(doc);
+  const label = getActionLabel(doc);
   const message = t`${label} submitted`;
   const toastOption: ToastOptions = {
     type: 'success',
     message,
-    duration: 5000,
+    duration: 'long',
     ...getSubmitSuccessToastAction(doc),
   };
   showToast(toastOption);
-}
-
-function getToastLabel(doc: Doc) {
-  const label = doc.schema.label ?? doc.schemaName;
-  if (doc.schema.naming === 'random') {
-    return label;
-  }
-
-  return doc.name ?? label;
 }
 
 function getSubmitSuccessToastAction(doc: Doc) {
@@ -671,4 +658,34 @@ function getSubmitSuccessToastAction(doc: Doc) {
   }
 
   return {};
+}
+
+export function showCannotSaveOrSubmitToast(doc: Doc) {
+  const label = getActionLabel(doc);
+  let message = t`${label} already saved`;
+
+  if (doc.schema.isSubmittable && doc.isSubmitted) {
+    message = t`${label} already submitted`;
+  }
+
+  showToast({ type: 'warning', message, duration: 'short' });
+}
+
+export function showCannotCancelOrDeleteToast(doc: Doc) {
+  const label = getActionLabel(doc);
+  let message = t`${label} cannot be deleted`;
+  if (doc.schema.isSubmittable && !doc.isCancelled) {
+    message = t`${label} cannot be cancelled`;
+  }
+
+  showToast({ type: 'warning', message, duration: 'short' });
+}
+
+function getActionLabel(doc: Doc) {
+  const label = doc.schema.label || doc.schemaName;
+  if (doc.schema.naming === 'random') {
+    return label;
+  }
+
+  return doc.name || label;
 }
