@@ -248,6 +248,46 @@ export function getInvoiceStatus(doc: RenderData | Doc): InvoiceStatus {
   return 'Saved';
 }
 
+export function getSerialNumberStatusColumn(): ColumnConfig {
+  return {
+    label: t`Status`,
+    fieldname: 'status',
+    fieldtype: 'Select',
+    render(doc) {
+      let status = doc.status;
+      if (typeof status !== 'string') {
+        status = 'Inactive';
+      }
+
+      const color = serialNumberStatusColor[status] ?? 'gray';
+      const label = getSerialNumberStatusText(status);
+
+      return {
+        template: `<Badge class="text-xs" color="${color}">${label}</Badge>`,
+      };
+    },
+  };
+}
+
+export const serialNumberStatusColor: Record<string, string | undefined> = {
+  Inactive: 'gray',
+  Active: 'green',
+  Delivered: 'blue',
+};
+
+export function getSerialNumberStatusText(status: string): string {
+  switch (status) {
+    case 'Inactive':
+      return t`Inactive`;
+    case 'Active':
+      return t`Active`;
+    case 'Delivered':
+      return t`Delivered`;
+    default:
+      return t`Inactive`;
+  }
+}
+
 export async function getExchangeRate({
   fromCurrency,
   toCurrency,

@@ -4,6 +4,7 @@ import { ModelNameEnum } from 'models/types';
 import { Money } from 'pesa';
 import { StockLedgerEntry } from './StockLedgerEntry';
 import { SMDetails, SMIDetails, SMTransferDetails } from './types';
+import { getSerialNumbers } from './helpers';
 
 export class StockManager {
   /**
@@ -133,6 +134,7 @@ export class StockManager {
     const date = details.date.toISOString();
     const formattedDate = this.fyo.format(details.date, 'Datetime');
     const batch = details.batch || undefined;
+    const serialNumbers = getSerialNumbers(details.serialNumber ?? '');
 
     let quantityBefore =
       (await this.fyo.db.getStockQuantity(
@@ -140,7 +142,8 @@ export class StockManager {
         details.fromLocation,
         undefined,
         date,
-        batch
+        batch,
+        serialNumbers
       )) ?? 0;
 
     if (this.isCancelled) {
@@ -167,7 +170,8 @@ export class StockManager {
       details.fromLocation,
       details.date.toISOString(),
       undefined,
-      batch
+      batch,
+      serialNumbers
     );
 
     if (quantityAfter === null) {
@@ -211,6 +215,7 @@ class StockManagerItem {
   fromLocation?: string;
   toLocation?: string;
   batch?: string;
+  serialNumber?: string;
 
   stockLedgerEntries?: StockLedgerEntry[];
 
@@ -226,6 +231,7 @@ class StockManagerItem {
     this.referenceName = details.referenceName;
     this.referenceType = details.referenceType;
     this.batch = details.batch;
+    this.serialNumber = details.serialNumber;
 
     this.fyo = fyo;
   }
@@ -259,8 +265,20 @@ class StockManagerItem {
   }
 
   #moveStockForSingleLocation(location: string, isOutward: boolean) {
-    let quantity = this.quantity!;
+    let quantity: number = this.quantity;
     if (quantity === 0) {
+      return;
+    }
+
+    const serialNumbers = getSerialNumbers(this.serialNumber ?? '');
+    if (serialNumbers.length) {
+      const snStockLedgerEntries = this.#getSerialNumberedStockLedgerEntries(
+        location,
+        isOutward,
+        serialNumbers
+      );
+
+      this.stockLedgerEntries?.push(...snStockLedgerEntries);
       return;
     }
 
@@ -268,17 +286,36 @@ class StockManagerItem {
       quantity = -quantity;
     }
 
-    // Stock Ledger Entry
     const stockLedgerEntry = this.#getStockLedgerEntry(location, quantity);
     this.stockLedgerEntries?.push(stockLedgerEntry);
   }
 
-  #getStockLedgerEntry(location: string, quantity: number) {
+  #getSerialNumberedStockLedgerEntries(
+    location: string,
+    isOutward: boolean,
+    serialNumbers: string[]
+  ): StockLedgerEntry[] {
+    let quantity = 1;
+    if (isOutward) {
+      quantity = -1;
+    }
+
+    return serialNumbers.map((sn) =>
+      this.#getStockLedgerEntry(location, quantity, sn)
+    );
+  }
+
+  #getStockLedgerEntry(
+    location: string,
+    quantity: number,
+    serialNumber?: string
+  ): StockLedgerEntry {
     return this.fyo.doc.getNewDoc(ModelNameEnum.StockLedgerEntry, {
       date: this.date,
       item: this.item,
       rate: this.rate,
       batch: this.batch || null,
+      serialNumber: serialNumber || null,
       quantity,
       location,
       referenceName: this.referenceName,

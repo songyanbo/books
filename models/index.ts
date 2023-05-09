@@ -19,6 +19,7 @@ import { SetupWizard } from './baseModels/SetupWizard/SetupWizard';
 import { Tax } from './baseModels/Tax/Tax';
 import { TaxSummary } from './baseModels/TaxSummary/TaxSummary';
 import { Batch } from './inventory/Batch';
+import { SerialNumber } from './inventory/SerialNumber';
 import { InventorySettings } from './inventory/InventorySettings';
 import { Location } from './inventory/Location';
 import { PurchaseReceipt } from './inventory/PurchaseReceipt';
@@ -48,6 +49,7 @@ export const models = {
   PurchaseInvoiceItem,
   SalesInvoice,
   SalesInvoiceItem,
+  SerialNumber,
   SetupWizard,
   PrintTemplate,
   Tax,

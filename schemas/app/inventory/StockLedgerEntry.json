@@ -38,6 +38,14 @@
       "section": "Details"
     },
     {
+      "fieldname": "serialNumber",
+      "label": "Serial Number",
+      "fieldtype": "Link",
+      "target": "SerialNumber",
+      "readOnly": true,
+      "section": "Details"
+    },
+    {
       "fieldname": "item",
       "label": "Item",
       "fieldtype": "Link",

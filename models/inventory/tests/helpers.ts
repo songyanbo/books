@@ -3,7 +3,7 @@ import { Batch } from 'models/inventory/Batch';
 import { ModelNameEnum } from 'models/types';
 import { StockMovement } from '../StockMovement';
 import { StockTransfer } from '../StockTransfer';
-import { MovementType } from '../types';
+import { MovementTypeEnum } from '../types';
 
 type ALE = {
   date: string;
@@ -28,6 +28,7 @@ type Transfer = {
   from?: string;
   to?: string;
   batch?: string;
+  serialNumber?: string;
   quantity: number;
   rate: number;
 };
@@ -36,8 +37,8 @@ interface TransferTwo extends Omit<Transfer, 'from' | 'to'> {
   location: string;
 }
 
-export function getItem(name: string, rate: number, hasBatch: boolean = false) {
-  return { name, rate, trackItem: true, hasBatch };
+export function getItem(name: string, rate: number, hasBatch: boolean = false, hasSerialNumber: boolean = false) {
+  return { name, rate, trackItem: true, hasBatch, hasSerialNumber };
 }
 
 export async function getBatch(
@@ -70,7 +71,7 @@ export async function getStockTransfer(
 }
 
 export async function getStockMovement(
-  movementType: MovementType,
+  movementType: MovementTypeEnum,
   date: Date,
   transfers: Transfer[],
   fyo: Fyo
@@ -84,6 +85,7 @@ export async function getStockMovement(
     from: fromLocation,
     to: toLocation,
     batch,
+    serialNumber,
     quantity,
     rate,
   } of transfers) {
@@ -92,6 +94,7 @@ export async function getStockMovement(
       fromLocation,
       toLocation,
       batch,
+      serialNumber,
       rate,
       quantity,
     });
