@@ -7,6 +7,7 @@
 }
 
 * {
+  outline-color: theme('colors.pink.400');
   font-variation-settings: 'slnt' 0deg;
 }
 .italic {
@@ -21,6 +22,10 @@
 
 html {
   color: theme('colors.black');
+}
+
+input[type='number']::-webkit-inner-spin-button {
+  appearance: none;
 }
 
 .window-drag {
@@ -59,7 +64,8 @@ html {
   --w-desk: calc(100vw - var(--w-sidebar));
   --w-desk-fixed: calc(var(--w-app) - var(--w-sidebar));
   --w-quick-edit: 22rem;
-  --w-scrollbar: 0.5rem;
+  --w-scrollbar: 0.6rem;
+  --w-trafficlights: 72px;
 
   /* Row Heights */
   --h-row-smallest: 2rem;
@@ -70,12 +76,31 @@ html {
   --h-app: 800px;
 }
 
+.backdrop {
+  position: fixed;
+  top: 0px;
+  left: 0px;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(2px);
+}
+
 .w-form {
   width: 600px;
 }
 
+.w-dialog {
+  width: 24rem;
+}
+
+.w-toast {
+  width: 24rem;
+}
+
 .w-quick-edit {
-  width: var(--w-quick-edit)
+  width: var(--w-quick-edit);
+  flex-shrink: 0;
 }
 
 .h-form {
@@ -108,4 +133,76 @@ html {
 
 .w-desk {
   width: var(--w-desk);
+}
+
+.show-mandatory::after {
+  content: '*';
+  display: inline-block;
+  width: 0px;
+  height: 0px;
+  margin-left: -0.875rem;
+  vertical-align: -3px;
+  @apply text-red-500;
+}
+
+.custom-scroll::-webkit-scrollbar {
+  width: var(--w-scrollbar);
+  height: var(--w-scrollbar);
+}
+
+.custom-scroll::-webkit-scrollbar-track:vertical {
+  border-left: solid 1px theme('colors.gray.100');
+}
+
+.custom-scroll::-webkit-scrollbar-track:horizontal {
+  border-top: solid 1px theme('colors.gray.100');
+}
+
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: theme('colors.gray.100');
+}
+
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: theme('colors.gray.200');
+}
+
+/* 
+  Transitions
+ */
+
+.quickedit-enter-from,
+.quickedit-leave-to {
+  transform: translateX(var(--w-quick-edit));
+  width: 0px;
+  opacity: 0;
+}
+
+.quickedit-enter-to,
+.quickedit-leave-from {
+  transform: translateX(0px);
+  width: var(--w-quick-edit);
+  opacity: 1;
+}
+
+.quickedit-enter-active,
+.quickedit-leave-active {
+  transition: all 150ms ease-out;
+}
+
+/* 
+  RTL
+ */
+
+[dir='rtl'] .rtl-rotate-180 {
+  transform: rotate(180deg);
+}
+
+[dir='rtl'] .custom-scroll::-webkit-scrollbar-track:vertical {
+  border-right: solid 1px theme('colors.gray.200');
+}
+
+.pill {
+  @apply py-0.5 px-1.5 rounded-md  text-xs;
+  width: fit-content;
+  height: fit-content;
 }

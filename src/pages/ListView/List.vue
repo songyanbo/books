@@ -1,10 +1,15 @@
 <template>
-  <div class="text-base flex flex-col overflow-y-hidden">
+  <div class="text-base flex flex-col overflow-hidden">
     <!-- Title Row -->
-    <div class="flex items-center">
-      <p class="w-8 text-right mr-4 text-gray-700">#</p>
+    <div
+      class="flex items-center"
+      :style="{
+        paddingRight: dataSlice.length > 13 ? 'var(--w-scrollbar)' : '',
+      }"
+    >
+      <p class="w-8 text-end me-4 text-gray-700">#</p>
       <Row
-        class="flex-1 text-gray-700 border-none h-row-mid"
+        class="flex-1 text-gray-700 h-row-mid"
         :columnCount="columns.length"
         gap="1rem"
       >
@@ -20,8 +25,8 @@
             flex
           "
           :class="{
-            'ml-auto': isNumeric(column.fieldtype),
-            'pr-4': i === columns.length - 1,
+            'ms-auto': isNumeric(column.fieldtype),
+            'pe-4': i === columns.length - 1,
           }"
         >
           {{ column.label }}
@@ -31,27 +36,27 @@
     <hr />
 
     <!-- Data Rows -->
-    <div class="overflow-y-auto" v-if="dataSlice.length !== 0">
-      <div v-for="(doc, i) in dataSlice" :key="doc.name">
+    <div class="overflow-y-auto custom-scroll" v-if="dataSlice.length !== 0">
+      <div v-for="(row, i) in dataSlice" :key="row.name">
         <!-- Row Content -->
         <div class="flex hover:bg-gray-50 items-center">
-          <p class="w-8 text-right mr-4 text-gray-900">
+          <p class="w-8 text-end me-4 text-gray-900">
             {{ i + pageStart + 1 }}
           </p>
           <Row
             gap="1rem"
-            class="cursor-pointer text-gray-900 flex-1 border-none h-row-mid"
-            @click="openForm(doc)"
+            class="cursor-pointer text-gray-900 flex-1 h-row-mid"
+            @click="$emit('openDoc', row.name)"
             :columnCount="columns.length"
           >
             <ListCell
               v-for="(column, c) in columns"
               :key="column.label"
               :class="{
-                'text-right': isNumeric(column.fieldtype),
-                'pr-4': c === columns.length - 1,
+                'text-end': isNumeric(column.fieldtype),
+                'pe-4': c === columns.length - 1,
               }"
-              :doc="doc"
+              :row="row"
               :column="column"
             />
           </Row>
@@ -84,19 +89,20 @@
   </div>
 </template>
 <script>
+import { clone } from 'lodash';
 import Button from 'src/components/Button';
 import Paginator from 'src/components/Paginator.vue';
 import Row from 'src/components/Row';
 import { fyo } from 'src/initFyo';
 import { isNumeric } from 'src/utils';
-import { openQuickEdit, routeTo } from 'src/utils/ui';
-import { defineComponent } from 'vue';
+import { objectForEach } from 'utils/index';
+import { defineComponent, toRaw } from 'vue';
 import ListCell from './ListCell';
 
 export default defineComponent({
   name: 'List',
   props: { listConfig: Object, filters: Object, schemaName: String },
-  emits: ['makeNewDoc'],
+  emits: ['openDoc', 'makeNewDoc', 'updatedData'],
   components: {
     Row,
     ListCell,
@@ -156,6 +162,10 @@ export default defineComponent({
       this.pageEnd = end;
     },
     setUpdateListeners() {
+      if (!this.schemaName) {
+        return;
+      }
+
       const listener = () => {
         this.updateData();
       };
@@ -169,25 +179,17 @@ export default defineComponent({
       fyo.db.observer.on(`delete:${this.schemaName}`, listener);
       fyo.doc.observer.on(`rename:${this.schemaName}`, listener);
     },
-    openForm(doc) {
-      if (this.listConfig.formRoute) {
-        routeTo(this.listConfig.formRoute(doc.name));
-        return;
-      }
-
-      openQuickEdit({
-        schemaName: this.schemaName,
-        name: doc.name,
-      });
-    },
     async updateData(filters) {
       if (!filters) {
         filters = { ...this.filters };
       }
 
-      const orderBy = !!fyo.getField(this.schemaName, 'date')
-        ? 'date'
-        : 'created';
+      filters = objectForEach(clone(filters), toRaw);
+
+      const orderBy = ['created'];
+      if (fyo.db.fieldMap[this.schemaName]['date']) {
+        orderBy.unshift('date');
+      }
 
       this.data = (
         await fyo.db.getAll(this.schemaName, {
@@ -196,6 +198,7 @@ export default defineComponent({
           orderBy,
         })
       ).map((d) => ({ ...d, schema: fyo.schemaMap[this.schemaName] }));
+      this.$emit('updatedData', filters);
     },
   },
 });

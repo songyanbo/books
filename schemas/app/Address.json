@@ -1,8 +1,15 @@
 {
   "name": "Address",
   "label": "Address",
+  "naming": "manual",
   "isSingle": false,
   "fields": [
+    {
+      "fieldname": "name",
+      "label": "Address Name",
+      "fieldtype": "Data",
+      "required": true
+    },
     {
       "fieldname": "addressLine1",
       "label": "Address Line 1",
@@ -48,24 +55,28 @@
       "fieldname": "emailAddress",
       "label": "Email Address",
       "placeholder": "Email Address",
-      "fieldtype": "Data"
+      "fieldtype": "Data",
+      "section": "Contacts"
     },
     {
       "fieldname": "phone",
       "label": "Phone",
       "placeholder": "Phone",
-      "fieldtype": "Data"
+      "fieldtype": "Data",
+      "section": "Contacts"
     },
     {
       "fieldname": "fax",
       "label": "Fax",
-      "fieldtype": "Data"
+      "fieldtype": "Data",
+      "section": "Contacts"
     },
     {
       "fieldname": "addressDisplay",
       "fieldtype": "Text",
       "label": "Address Display",
-      "readOnly": true
+      "readOnly": true,
+      "section": "Miscellaneous"
     }
   ],
   "quickEditFields": [
@@ -76,5 +87,5 @@
     "country",
     "postalCode"
   ],
-  "inlineEditDisplayField": "addressDisplay"
+  "linkDisplayField": "addressDisplay"
 }

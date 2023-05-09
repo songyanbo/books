@@ -1,5 +1,5 @@
 <template>
-  <div class="inline-grid border-b" :style="style" v-bind="$attrs">
+  <div class="inline-grid" :style="style" v-bind="$attrs">
     <slot></slot>
   </div>
 </template>
@@ -34,7 +34,7 @@ export default {
       }
       if (this.ratio.length) {
         obj['grid-template-columns'] = this.ratio
-          .map((r) => `${r}fr`)
+          .map((r) => `minmax(0, ${r}fr)`)
           .join(' ');
       }
       if (this.gridTemplateColumns) {

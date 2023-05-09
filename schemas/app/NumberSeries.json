@@ -1,6 +1,7 @@
 {
   "name": "NumberSeries",
   "label": "Number Series",
+  "naming": "manual",
   "isSingle": false,
   "isChild": false,
   "fields": [
@@ -32,11 +33,11 @@
       "options": [
         {
           "value": "SalesInvoice",
-          "label": "Invoice"
+          "label": "Sales Invoice"
         },
         {
           "value": "PurchaseInvoice",
-          "label": "Bill"
+          "label": "Purchase Invoice"
         },
         {
           "value": "Payment",
@@ -45,11 +46,22 @@
         {
           "value": "JournalEntry",
           "label": "Journal Entry"
+        },
+        {
+          "value": "StockMovement",
+          "label": "Stock Movement"
+        },
+        {
+          "value": "Shipment",
+          "label": "Shipment"
+        },
+        {
+          "value": "PurchaseReceipt",
+          "label": "Purchase Receipt"
         }
       ],
       "default": "-",
-      "required": true,
-      "readOnly": true
+      "required": true
     },
     {
       "fieldname": "current",

@@ -3,25 +3,19 @@
     :df="languageDf"
     :value="value"
     @change="onChange"
-    :input-class="'focus:outline-none rounded ' + inputClass"
+    :border="true"
+    input-class="rounded py-1.5"
   />
 </template>
-<script>
+<script lang="ts">
 import { DEFAULT_LANGUAGE } from 'fyo/utils/consts';
 import { fyo } from 'src/initFyo';
 import { languageCodeMap, setLanguageMap } from 'src/utils/language';
+import { defineComponent } from 'vue';
 import FormControl from './FormControl.vue';
 
-export default {
-  methods: {
-    setLanguageMap,
-  },
+export default defineComponent({
   props: {
-    inputClass: {
-      type: String,
-      default:
-        'px-3 py-2 text-base',
-    },
     dontReload: {
       type: Boolean,
       default: false,
@@ -29,7 +23,11 @@ export default {
   },
   components: { FormControl },
   methods: {
-    onChange(value) {
+    onChange(value: unknown) {
+      if (typeof value !== 'string') {
+        return;
+      }
+
       if (languageCodeMap[value] === undefined) {
         return;
       }
@@ -52,5 +50,5 @@ export default {
       };
     },
   },
-};
+});
 </script>

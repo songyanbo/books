@@ -19,10 +19,10 @@
           @mouseleave="active = null"
         >
           <div class="w-3 h-3 rounded-sm flex-shrink-0" :class="d.class" />
-          <p class="ml-2 overflow-x-auto whitespace-nowrap no-scrollbar w-28">
+          <p class="ms-2 overflow-x-auto whitespace-nowrap no-scrollbar w-28">
             {{ d.account }}
           </p>
-          <p class="whitespace-nowrap flex-shrink-0 ml-auto">
+          <p class="whitespace-nowrap flex-shrink-0 ms-auto">
             {{ fyo.format(d?.total ?? 0, 'Currency') }}
           </p>
         </div>
@@ -58,26 +58,22 @@ import { fyo } from 'src/initFyo';
 import { uicolors } from 'src/utils/colors';
 import { getDatesAndPeriodList } from 'src/utils/misc';
 import DonutChart from '../../components/Charts/DonutChart.vue';
-import PeriodSelector from './PeriodSelector';
-import SectionHeader from './SectionHeader';
+import DashboardChartBase from './BaseDashboardChart.vue';
+import PeriodSelector from './PeriodSelector.vue';
+import SectionHeader from './SectionHeader.vue';
 
 export default {
   name: 'Expenses',
+  extends: DashboardChartBase,
   components: {
     DonutChart,
     PeriodSelector,
     SectionHeader,
   },
   data: () => ({
-    period: 'This Year',
     active: null,
     expenses: [],
   }),
-  watch: {
-    period() {
-      this.setData();
-    },
-  },
   activated() {
     this.setData();
   },

@@ -1,20 +1,68 @@
-import { onMounted, onUnmounted, Ref, ref } from 'vue';
+import { Keys } from 'utils/types';
+import {
+  onActivated,
+  onDeactivated,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+} from 'vue';
+import { getIsMac } from './misc';
+import { Shortcuts } from './shortcuts';
+import { DocRef } from './types';
+import {
+  commonDocCancel,
+  commonDocSubmit,
+  commonDocSync,
+  commongDocDelete,
+  showCannotCancelOrDeleteToast,
+  showCannotSaveOrSubmitToast,
+} from './ui';
 
-export function useKeys(callback?: (keys: Set<string>) => void) {
-  const keys: Ref<Set<string>> = ref(new Set());
+export function useKeys() {
+  const isMac = getIsMac();
+  const keys: Keys = reactive({
+    pressed: new Set<string>(),
+    alt: false,
+    ctrl: false,
+    meta: false,
+    shift: false,
+    repeat: false,
+  });
 
   const keydownListener = (e: KeyboardEvent) => {
-    keys.value.add(e.code);
-    callback?.(keys.value);
+    keys.alt = e.altKey;
+    keys.ctrl = e.ctrlKey;
+    keys.meta = e.metaKey;
+    keys.shift = e.shiftKey;
+    keys.repeat = e.repeat;
+
+    const { code } = e;
+    if (
+      code.startsWith('Alt') ||
+      code.startsWith('Control') ||
+      code.startsWith('Meta') ||
+      code.startsWith('Shift')
+    ) {
+      return;
+    }
+
+    keys.pressed.add(code);
   };
 
   const keyupListener = (e: KeyboardEvent) => {
-    keys.value.delete(e.code);
-
-    // Key up won't trigger on macOS for other keys.
-    if (e.code === 'MetaLeft') {
-      keys.value.clear();
+    const { code } = e;
+    if (code.startsWith('Meta') && isMac) {
+      keys.alt = false;
+      keys.ctrl = false;
+      keys.meta = false;
+      keys.shift = false;
+      keys.repeat = false;
+      keys.pressed.clear();
+      return;
     }
+
+    keys.pressed.delete(code);
   };
 
   onMounted(() => {
@@ -46,4 +94,86 @@ export function useMouseLocation() {
   });
 
   return loc;
+}
+
+export function useDocShortcuts(
+  shortcuts: Shortcuts,
+  docRef: DocRef,
+  name: string,
+  isMultiple: boolean = true
+) {
+  let context = name;
+  if (isMultiple) {
+    context = name + '-' + Math.random().toString(36).slice(2, 6);
+  }
+
+  const syncOrSubmitCallback = async () => {
+    const doc = docRef.value;
+    if (!doc) {
+      return;
+    }
+
+    if (doc.canSave) {
+      return await commonDocSync(doc, true);
+    }
+
+    if (doc.canSubmit) {
+      return await commonDocSubmit(doc);
+    }
+
+    showCannotSaveOrSubmitToast(doc);
+  };
+
+  const cancelOrDeleteCallback = async () => {
+    const doc = docRef.value;
+    if (!doc) {
+      return;
+    }
+
+    if (doc.canCancel) {
+      return await commonDocCancel(doc);
+    }
+
+    if (doc.canDelete) {
+      return await commongDocDelete(doc);
+    }
+
+    showCannotCancelOrDeleteToast(doc);
+  };
+
+  onMounted(() => {
+    if (isMultiple && shortcuts.has(context)) {
+      return;
+    }
+
+    shortcuts.pmod.set(context, ['KeyS'], syncOrSubmitCallback, false);
+    shortcuts.pmod.set(context, ['Backspace'], cancelOrDeleteCallback, false);
+  });
+
+  onActivated(() => {
+    if (isMultiple && shortcuts.has(context)) {
+      return;
+    }
+
+    shortcuts.pmod.set(context, ['KeyS'], syncOrSubmitCallback, false);
+    shortcuts.pmod.set(context, ['Backspace'], cancelOrDeleteCallback, false);
+  });
+
+  onDeactivated(() => {
+    if (!shortcuts.has(context)) {
+      return;
+    }
+
+    shortcuts.delete(context);
+  });
+
+  onUnmounted(() => {
+    if (!shortcuts.has(context)) {
+      return;
+    }
+
+    shortcuts.delete(context);
+  });
+
+  return context;
 }

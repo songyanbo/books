@@ -1,5 +1,5 @@
 import { getMoneyMaker, MoneyMaker } from 'pesa';
-import { Field } from 'schemas/types';
+import { Field, FieldType } from 'schemas/types';
 import { getIsNullOrUndef } from 'utils';
 import { markRaw } from 'vue';
 import { AuthHandler } from './core/authHandler';
@@ -13,7 +13,7 @@ import { TelemetryManager } from './telemetry/telemetry';
 import {
   DEFAULT_CURRENCY,
   DEFAULT_DISPLAY_PRECISION,
-  DEFAULT_INTERNAL_PRECISION
+  DEFAULT_INTERNAL_PRECISION,
 } from './utils/consts';
 import * as errors from './utils/errors';
 import { format } from './utils/format';
@@ -84,7 +84,11 @@ export class Fyo {
     return this.db.schemaMap;
   }
 
-  format(value: DocValue, field: string | Field, doc?: Doc) {
+  get fieldMap() {
+    return this.db.fieldMap;
+  }
+
+  format(value: unknown, field: FieldType | Field, doc?: Doc) {
     return format(value, field, doc ?? null, this);
   }
 
@@ -163,8 +167,7 @@ export class Fyo {
   }
 
   getField(schemaName: string, fieldname: string) {
-    const schema = this.schemaMap[schemaName];
-    return schema?.fields.find((f) => f.fieldname === fieldname);
+    return this.fieldMap[schemaName][fieldname];
   }
 
   async getValue(
@@ -202,7 +205,7 @@ export class Fyo {
     return value;
   }
 
-  purgeCache() {
+  async purgeCache() {
     this.pesa = getMoneyMaker({
       currency: DEFAULT_CURRENCY,
       precision: DEFAULT_INTERNAL_PRECISION,
@@ -216,9 +219,9 @@ export class Fyo {
     this.currencySymbols = {};
     this.errorLog = [];
     this.temp = {};
-    this.db.purgeCache();
-    this.auth.purgeCache();
-    this.doc.purgeCache();
+    await this.db.purgeCache();
+    await this.auth.purgeCache();
+    await this.doc.purgeCache();
   }
 
   store = {
@@ -230,6 +233,7 @@ export class Fyo {
     instanceId: '',
     deviceId: '',
     openCount: -1,
+    appFlags: {} as Record<string, boolean>,
   };
 }
 

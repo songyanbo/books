@@ -1,12 +1,18 @@
 <template>
-  <div>
-    <label class="flex items-center">
-      <div class="mr-3 text-gray-600 text-sm" v-if="showLabel && !labelRight">
+  <div :class="[inputClasses, containerClasses]">
+    <label
+      class="flex items-center"
+      :class="spaceBetween ? 'justify-between' : ''"
+    >
+      <div class="me-3" :class="labelClasses" v-if="showLabel && !labelRight">
         {{ df.label }}
       </div>
-      <div style="width: 14px; height: 14px; overflow: hidden; cursor: pointer">
+      <div
+        style="width: 14px; height: 14px; overflow: hidden"
+        :class="isReadOnly ? 'cursor-default' : 'cursor-pointer'"
+      >
         <svg
-          v-if="checked"
+          v-if="value"
           width="14"
           height="14"
           viewBox="0 0 14 14"
@@ -54,31 +60,37 @@
         <input
           ref="input"
           type="checkbox"
-          :class="inputClasses"
-          :checked="value"
+          :checked="getChecked(value)"
           :readonly="isReadOnly"
-          @change="(e) => !isReadOnly && triggerChange(e.target.checked)"
+          :tabindex="isReadOnly ? '-1' : '0'"
+          @change="onChange"
           @focus="(e) => $emit('focus', e)"
         />
       </div>
-      <div class="ml-3 text-gray-600 text-sm" v-if="showLabel && labelRight">
+      <div class="ms-3" :class="labelClasses" v-if="showLabel && labelRight">
         {{ df.label }}
       </div>
     </label>
   </div>
 </template>
-<script>
-import Base from './Base';
+<script lang="ts">
+import { defineComponent } from 'vue';
+import Base from './Base.vue';
 
-export default {
+export default defineComponent({
   name: 'Check',
   extends: Base,
   emits: ['focus'],
   props: {
+    spaceBetween: {
+      default: false,
+      type: Boolean,
+    },
     labelRight: {
       default: true,
       type: Boolean,
     },
+    labelClass: String,
   },
   data() {
     return {
@@ -88,14 +100,32 @@ export default {
     };
   },
   computed: {
-    inputClasses() {
-      return this.getInputClassesFromProp([]);
-    },
-    checked() {
-      return this.value;
+    labelClasses() {
+      if (this.labelClass) {
+        return this.labelClass;
+      }
+
+      return 'text-gray-600 text-base';
     },
   },
-};
+  methods: {
+    getChecked(value: unknown) {
+      return Boolean(value);
+    },
+    onChange(e: Event) {
+      if (this.isReadOnly) {
+        return;
+      }
+
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+
+      this.triggerChange(target.checked);
+    },
+  },
+});
 </script>
 
 <style scoped>

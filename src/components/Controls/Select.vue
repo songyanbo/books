@@ -1,11 +1,11 @@
 <template>
   <div>
-    <div class="text-gray-600 text-sm mb-1" v-if="showLabel">
+    <div :class="labelClasses" v-if="showLabel">
       {{ df.label }}
     </div>
     <div
-      class="flex items-center justify-between focus-within:bg-gray-200"
-      :class="inputClasses"
+      class="flex items-center justify-between"
+      :class="[inputClasses, containerClasses]"
     >
       <select
         class="
@@ -17,13 +17,18 @@
         "
         :class="{
           'pointer-events-none': isReadOnly,
-          'text-gray-400': !value,
+          'text-gray-500': !value,
         }"
         :value="value"
-        @change="(e) => triggerChange(e.target.value)"
+        @change="onChange"
         @focus="(e) => $emit('focus', e)"
       >
-        <option value="" disabled selected>
+        <option
+          value=""
+          disabled
+          selected
+          v-if="inputPlaceholder && !showLabel"
+        >
           {{ inputPlaceholder }}
         </option>
         <option
@@ -44,7 +49,8 @@
       >
         <path
           d="M1 2.636L2.636 1l1.637 1.636M1 7.364L2.636 9l1.637-1.636"
-          stroke="#404040"
+          class="stroke-current"
+          :class="showMandatory ? 'text-red-400' : 'text-gray-400'"
           fill="none"
           fill-rule="evenodd"
           stroke-linecap="round"
@@ -55,31 +61,36 @@
   </div>
 </template>
 
-<script>
-import Base from './Base';
+<script lang="ts">
+import Base from './Base.vue';
 
-export default {
+import { defineComponent } from 'vue';
+import { SelectOption } from 'schemas/types';
+export default defineComponent({
   name: 'Select',
   extends: Base,
   emits: ['focus'],
   methods: {
-    map(v) {
-      if (this.df.map) {
-        return this.df.map[v] ?? v;
+    onChange(e: Event) {
+      const target = e.target;
+      if (
+        !(target instanceof HTMLSelectElement) &&
+        !(target instanceof HTMLInputElement)
+      ) {
+        return;
       }
-      return v;
+
+      this.triggerChange(target.value);
     },
   },
   computed: {
-    options() {
-      let options = this.df.options;
-      return options.map((o) => {
-        if (typeof o === 'string') {
-          return { label: this.map(o), value: o };
-        }
-        return o;
-      });
+    options(): SelectOption[] {
+      if (this.df.fieldtype !== 'Select') {
+        return [];
+      }
+
+      return this.df.options;
     },
   },
-};
+});
 </script>

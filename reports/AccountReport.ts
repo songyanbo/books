@@ -1,4 +1,4 @@
-import { t } from 'fyo';
+import { Fyo, t } from 'fyo';
 import { cloneDeep } from 'lodash';
 import { DateTime } from 'luxon';
 import { AccountRootType } from 'models/baseModels/Account/types';
@@ -26,7 +26,6 @@ import {
   ValueMap,
 } from 'reports/types';
 import { Field } from 'schemas/types';
-import { fyo } from 'src/initFyo';
 import { getMapFromList } from 'utils';
 import { QueryFilter } from 'utils/db/types';
 
@@ -153,7 +152,9 @@ export abstract class AccountReport extends LedgerReport {
     map: GroupedMap
   ): Promise<AccountNameValueMapMap> {
     const accountValueMap: AccountNameValueMapMap = new Map();
-    const accountMap = await this._getAccountMap();
+    if (!this.accountMap) {
+      await this._getAccountMap();
+    }
 
     for (const account of map.keys()) {
       const valueMap: ValueMap = new Map();
@@ -167,9 +168,13 @@ export abstract class AccountReport extends LedgerReport {
           continue;
         }
 
+        if (!this.accountMap?.[entry.account]) {
+          this._getAccountMap(true);
+        }
+
         const totalBalance = valueMap.get(key!)?.balance ?? 0;
         const balance = (entry.debit ?? 0) - (entry.credit ?? 0);
-        const rootType = accountMap[entry.account].rootType;
+        const rootType = this.accountMap![entry.account]?.rootType;
 
         if (isCredit(rootType)) {
           valueMap.set(key!, { balance: totalBalance - balance });
@@ -195,8 +200,8 @@ export abstract class AccountReport extends LedgerReport {
     return accountTree;
   }
 
-  async _getAccountMap() {
-    if (this.accountMap) {
+  async _getAccountMap(force: boolean = false) {
+    if (this.accountMap && !force) {
       return this.accountMap;
     }
 
@@ -224,7 +229,7 @@ export abstract class AccountReport extends LedgerReport {
       const toDate = dr.toDate.toMillis();
       const fromDate = dr.fromDate.toMillis();
 
-      if (fromDate < entryDate && entryDate <= toDate) {
+      if (entryDate >= fromDate && entryDate < toDate) {
         return dr;
       }
     }
@@ -272,11 +277,15 @@ export abstract class AccountReport extends LedgerReport {
     let fromDate: string;
 
     if (this.basedOn === 'Until Date') {
-      toDate = this.toDate!;
+      toDate = DateTime.fromISO(this.toDate!).plus({ days: 1 }).toISODate();
       const months = monthsMap[this.periodicity] * Math.max(this.count ?? 1, 1);
-      fromDate = DateTime.fromISO(toDate).minus({ months }).toISODate();
+      fromDate = DateTime.fromISO(this.toDate!).minus({ months }).toISODate();
     } else {
-      const fy = await getFiscalEndpoints(this.toYear!, this.fromYear!);
+      const fy = await getFiscalEndpoints(
+        this.toYear!,
+        this.fromYear!,
+        this.fyo
+      );
       toDate = fy.toDate;
       fromDate = fy.fromDate;
     }
@@ -289,7 +298,7 @@ export abstract class AccountReport extends LedgerReport {
     const { fromDate, toDate } = await this._getFromAndToDates();
 
     const dateFilter: string[] = [];
-    dateFilter.push('<=', toDate);
+    dateFilter.push('<', toDate);
     dateFilter.push('>=', fromDate);
 
     filters.date = dateFilter;
@@ -332,17 +341,17 @@ export abstract class AccountReport extends LedgerReport {
     let dateFilters = [
       {
         fieldtype: 'Int',
-        fieldname: 'toYear',
-        placeholder: t`To Year`,
-        label: t`To Year`,
+        fieldname: 'fromYear',
+        placeholder: t`From Year`,
+        label: t`From Year`,
         minvalue: 2000,
         required: true,
       },
       {
         fieldtype: 'Int',
-        fieldname: 'fromYear',
-        placeholder: t`From Year`,
-        label: t`From Year`,
+        fieldname: 'toYear',
+        placeholder: t`To Year`,
+        label: t`To Year`,
         minvalue: 2000,
         required: true,
       },
@@ -397,16 +406,18 @@ export abstract class AccountReport extends LedgerReport {
 
     const dateColumns = this._dateRanges!.sort(
       (a, b) => b.toDate.toMillis() - a.toDate.toMillis()
-    ).map(
-      (d) =>
-        ({
-          label: this.fyo.format(d.toDate.toJSDate(), 'Date'),
-          fieldtype: 'Data',
-          fieldname: 'toDate',
-          align: 'right',
-          width: ACC_BAL_WIDTH,
-        } as ColumnField)
-    );
+    ).map((d) => {
+      const toDate = d.toDate.minus({ days: 1 });
+      const label = this.fyo.format(toDate.toJSDate(), 'Date');
+
+      return {
+        label,
+        fieldtype: 'Data',
+        fieldname: 'toDate',
+        align: 'right',
+        width: ACC_BAL_WIDTH,
+      } as ColumnField;
+    });
 
     return [columns, dateColumns].flat();
   }
@@ -414,7 +425,11 @@ export abstract class AccountReport extends LedgerReport {
   metaFilters: string[] = ['basedOn'];
 }
 
-export async function getFiscalEndpoints(toYear: number, fromYear: number) {
+export async function getFiscalEndpoints(
+  toYear: number,
+  fromYear: number,
+  fyo: Fyo
+) {
   const fys = (await fyo.getValue(
     ModelNameEnum.AccountingSettings,
     'fiscalYearStart'
@@ -461,6 +476,10 @@ function setValueMapOnAccountTreeNodes(
   rangeGroupedMap: AccountNameValueMapMap
 ) {
   for (const name of rangeGroupedMap.keys()) {
+    if (!accountTree[name]) {
+      continue;
+    }
+
     const valueMap = rangeGroupedMap.get(name)!;
     accountTree[name].valueMap = valueMap;
     accountTree[name].prune = false;
@@ -539,13 +558,15 @@ function pruneAccountTree(accountTree: AccountTree) {
   }
 
   for (const root of Object.keys(accountTree)) {
-    accountTree[root].children = getPrunedChildren(accountTree[root].children!);
+    accountTree[root].children = getPrunedChildren(
+      accountTree[root].children ?? []
+    );
   }
 }
 
 function getPrunedChildren(children: AccountTreeNode[]): AccountTreeNode[] {
   return children.filter((child) => {
-    if (child.children) {
+    if (child.children?.length) {
       child.children = getPrunedChildren(child.children);
     }
 

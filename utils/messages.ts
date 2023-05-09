@@ -19,9 +19,10 @@ export enum IPC_ACTIONS {
   SEND_ERROR = 'send-error',
   GET_LANGUAGE_MAP = 'get-language-map',
   CHECK_FOR_UPDATES = 'check-for-updates',
-  GET_FILE = 'get-file',
+  SELECT_FILE = 'select-file',
   GET_CREDS = 'get-creds',
   GET_DB_LIST = 'get-db-list',
+  GET_TEMPLATES = 'get-templates',
   DELETE_FILE = 'delete-file',
   // Database messages
   DB_CREATE = 'db-create',
@@ -33,7 +34,7 @@ export enum IPC_ACTIONS {
 
 // ipcMain.send(...)
 export enum IPC_CHANNELS {
-  MAIN_PROCESS_ERROR = 'main-process-error',
+  LOG_MAIN_PROCESS_ERROR = 'main-process-error',
   CONSOLE_LOG = 'console-log',
 }
 
@@ -41,4 +42,10 @@ export enum DB_CONN_FAILURE {
   INVALID_FILE = 'invalid-file',
   CANT_OPEN = 'cant-open',
   CANT_CONNECT = 'cant-connect',
+}
+
+// events
+export enum CUSTOM_EVENTS {
+  MAIN_PROCESS_ERROR = 'main-process-error',
+  LOG_UNEXPECTED = 'log-unexpected',
 }

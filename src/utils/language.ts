@@ -2,8 +2,9 @@ import { ipcRenderer } from 'electron';
 import { DEFAULT_LANGUAGE } from 'fyo/utils/consts';
 import { setLanguageMapOnTranslationString } from 'fyo/utils/translation';
 import { fyo } from 'src/initFyo';
-import { IPC_ACTIONS, IPC_MESSAGES } from 'utils/messages';
-import { showToast } from './ui';
+import { IPC_ACTIONS } from 'utils/messages';
+import { reloadWindow } from './ipcCalls';
+import { systemLanguageRef } from './refs';
 
 // Language: Language Code in books/translations
 export const languageCodeMap: Record<string, string> = {
@@ -15,7 +16,11 @@ export const languageCodeMap: Record<string, string> = {
   Catalan: 'ca-ES',
   Spanish: 'es',
   Dutch: 'nl',
-  Gujarati: 'gu'
+  Gujarati: 'gu',
+  Turkish: 'tr',
+  Korean: 'ko',
+  Swedish: 'sv',
+  'Simplified Chinese': 'zh-CN',
 };
 
 export async function setLanguageMap(
@@ -38,10 +43,11 @@ export async function setLanguageMap(
 
   if (success && !usingDefault) {
     fyo.config.set('language', language);
+    systemLanguageRef.value = language;
   }
 
   if (!dontReload && success && initLanguage !== oldLanguage) {
-    await ipcRenderer.send(IPC_MESSAGES.RELOAD_MAIN_WINDOW);
+    reloadWindow();
   }
   return success;
 }
@@ -65,6 +71,7 @@ async function fetchAndSetLanguageMap(code: string) {
   );
 
   if (!success) {
+    const { showToast } = await import('src/utils/interactive');
     showToast({ type: 'error', message });
   } else {
     setLanguageMapOnTranslationString(languageMap);

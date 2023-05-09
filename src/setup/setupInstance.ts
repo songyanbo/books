@@ -5,15 +5,24 @@ import { createNumberSeries } from 'fyo/model/naming';
 import {
   DEFAULT_CURRENCY,
   DEFAULT_LOCALE,
-  DEFAULT_SERIES_START
+  DEFAULT_SERIES_START,
 } from 'fyo/utils/consts';
-import { AccountRootTypeEnum } from 'models/baseModels/Account/types';
+import {
+  AccountRootTypeEnum,
+  AccountTypeEnum,
+} from 'models/baseModels/Account/types';
 import { AccountingSettings } from 'models/baseModels/AccountingSettings/AccountingSettings';
+import { numberSeriesDefaultsMap } from 'models/baseModels/Defaults/Defaults';
+import { InventorySettings } from 'models/inventory/InventorySettings';
+import { ValuationMethod } from 'models/inventory/types';
 import { ModelNameEnum } from 'models/types';
-import { initializeInstance } from 'src/initFyo';
 import { createRegionalRecords } from 'src/regional';
+import {
+  initializeInstance,
+  setCurrencySymbols,
+} from 'src/utils/initialization';
 import { getRandomString } from 'utils';
-import { defaultUOMs } from 'utils/defaults';
+import { getDefaultLocations, getDefaultUOMs } from 'utils/defaults';
 import { getCountryCodeFromCountry, getCountryInfo } from 'utils/misc';
 import { CountryInfo } from 'utils/types';
 import { CreateCOA } from './createCOA';
@@ -38,8 +47,13 @@ export default async function setupInstance(
   await createRegionalRecords(country, fyo);
   await createDefaultEntries(fyo);
   await createDefaultNumberSeries(fyo);
+  await updateInventorySettings(fyo);
 
   await completeSetup(companyName, fyo);
+  if (!Object.keys(fyo.currencySymbols).length) {
+    await setCurrencySymbols(fyo);
+  }
+
   fyo.store.skipTelemetryLogging = false;
 }
 
@@ -47,8 +61,12 @@ async function createDefaultEntries(fyo: Fyo) {
   /**
    * Create default UOM entries
    */
-  for (const uom of defaultUOMs) {
+  for (const uom of getDefaultUOMs(fyo)) {
     await checkAndCreateDoc(ModelNameEnum.UOM, uom, fyo);
+  }
+
+  for (const loc of getDefaultLocations(fyo)) {
+    await checkAndCreateDoc(ModelNameEnum.Location, loc, fyo);
   }
 }
 
@@ -203,24 +221,26 @@ export async function createDiscountAccount(fyo: Fyo) {
 }
 
 async function setDefaultAccounts(fyo: Fyo) {
-  const accountMap: Record<string, string> = {
-    writeOffAccount: fyo.t`Write Off`,
-    roundOffAccount: fyo.t`Rounded Off`,
-  };
+  await setDefaultAccount('writeOffAccount', fyo.t`Write Off`, fyo);
+  const isSet = await setDefaultAccount(
+    'roundOffAccount',
+    fyo.t`Rounded Off`,
+    fyo
+  );
 
-  for (const key in accountMap) {
-    const accountName = accountMap[key];
-    const accountExists = await fyo.db.exists(
-      ModelNameEnum.Account,
-      accountName
-    );
-
-    if (!accountExists) {
-      continue;
-    }
-
-    await fyo.singles.AccountingSettings!.setAndSync(key, accountName);
+  if (!isSet) {
+    await setDefaultAccount('roundOffAccount', fyo.t`Round Off`, fyo);
   }
+}
+
+async function setDefaultAccount(key: string, accountName: string, fyo: Fyo) {
+  const accountExists = await fyo.db.exists(ModelNameEnum.Account, accountName);
+  if (!accountExists) {
+    return false;
+  }
+
+  await fyo.singles.AccountingSettings!.setAndSync(key, accountName);
+  return true;
 }
 
 async function completeSetup(companyName: string, fyo: Fyo) {
@@ -295,13 +315,66 @@ async function getBankAccountParentName(country: string, fyo: Fyo) {
 }
 
 async function createDefaultNumberSeries(fyo: Fyo) {
-  await createNumberSeries('SINV-', 'SalesInvoice', DEFAULT_SERIES_START, fyo);
-  await createNumberSeries(
-    'PINV-',
-    'PurchaseInvoice',
-    DEFAULT_SERIES_START,
-    fyo
-  );
-  await createNumberSeries('PAY-', 'Payment', DEFAULT_SERIES_START, fyo);
-  await createNumberSeries('JV-', 'JournalEntry', DEFAULT_SERIES_START, fyo);
+  const numberSeriesFields = Object.values(fyo.schemaMap)
+    .map((f) => f?.fields)
+    .flat()
+    .filter((f) => f?.fieldname === 'numberSeries');
+
+  for (const field of numberSeriesFields) {
+    const defaultValue = field?.default as string | undefined;
+    const schemaName = field?.schemaName;
+    if (!defaultValue || !schemaName) {
+      continue;
+    }
+
+    await createNumberSeries(
+      defaultValue,
+      schemaName,
+      DEFAULT_SERIES_START,
+      fyo
+    );
+
+    const defaultKey = numberSeriesDefaultsMap[schemaName];
+    if (!defaultKey || fyo.singles.Defaults?.[defaultKey]) {
+      continue;
+    }
+
+    await fyo.singles.Defaults?.setAndSync(defaultKey as string, defaultValue);
+  }
+}
+
+async function updateInventorySettings(fyo: Fyo) {
+  const inventorySettings = (await fyo.doc.getDoc(
+    ModelNameEnum.InventorySettings
+  )) as InventorySettings;
+
+  if (!inventorySettings.valuationMethod) {
+    await inventorySettings.set('valuationMethod', ValuationMethod.FIFO);
+  }
+  const accountTypeDefaultMap = {
+    [AccountTypeEnum.Stock]: 'stockInHand',
+    [AccountTypeEnum['Stock Received But Not Billed']]:
+      'stockReceivedButNotBilled',
+    [AccountTypeEnum['Cost of Goods Sold']]: 'costOfGoodsSold',
+  } as Record<string, string>;
+
+  for (const accountType in accountTypeDefaultMap) {
+    const accounts = (await fyo.db.getAllRaw('Account', {
+      filters: { accountType, isGroup: false },
+    })) as { name: string }[];
+
+    if (!accounts.length) {
+      continue;
+    }
+
+    const settingName = accountTypeDefaultMap[accountType]!;
+    inventorySettings.set(settingName, accounts[0].name);
+  }
+
+  const location = fyo.t`Stores`;
+  if (await fyo.db.exists(ModelNameEnum.Location, location)) {
+    inventorySettings.set('defaultLocation', location);
+  }
+
+  await inventorySettings.sync();
 }

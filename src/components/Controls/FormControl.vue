@@ -1,12 +1,14 @@
 <script>
 import { h } from 'vue';
 import AttachImage from './AttachImage.vue';
+import Attachment from './Attachment.vue';
 import AutoComplete from './AutoComplete.vue';
 import Check from './Check.vue';
 import Color from './Color.vue';
 import Currency from './Currency.vue';
 import Data from './Data.vue';
 import Date from './Date.vue';
+import Datetime from './Datetime.vue';
 import DynamicLink from './DynamicLink.vue';
 import Float from './Float.vue';
 import Int from './Int.vue';
@@ -23,11 +25,13 @@ const components = {
   Select,
   Link,
   Date,
+  Datetime,
   Table,
   AutoComplete,
   DynamicLink,
   Int,
   Float,
+  Attachment,
   Currency,
   Text,
 };
@@ -44,6 +48,15 @@ export default {
     });
   },
   methods: {
+    clear() {
+      const input = this.$refs.control.$refs.input;
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+    },
+    select() {
+      this.$refs.control.$refs?.input?.select()
+    },
     focus() {
       this.$refs.control.focus();
     },

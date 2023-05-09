@@ -1,17 +1,22 @@
 <template>
   <div class="flex flex-col">
     <PageHeader :title="title">
+      <Button :icon="false" @click="openExportModal = true" ref="exportButton">
+        {{ t`Export` }}
+      </Button>
       <FilterDropdown
         ref="filterDropdown"
         @change="applyFilter"
         :schema-name="schemaName"
       />
       <Button
+        v-if="canCreate"
         :icon="true"
         type="primary"
         @click="makeNewDoc"
         :padding="false"
         class="px-3"
+        ref="makeNewDocButton"
       >
         <feather-icon name="plus" class="w-4 h-4" />
       </Button>
@@ -22,94 +27,149 @@
       :listConfig="listConfig"
       :filters="filters"
       class="flex-1 flex h-full"
+      @openDoc="openDoc"
+      @updatedData="updatedData"
       @makeNewDoc="makeNewDoc"
     />
+    <Modal :open-modal="openExportModal" @closemodal="openExportModal = false">
+      <ExportWizard
+        class="w-form"
+        :schema-name="schemaName"
+        :title="pageTitle"
+        :list-filters="listFilters"
+      />
+    </Modal>
   </div>
 </template>
-<script>
+<script lang="ts">
+import { Field } from 'schemas/types';
 import Button from 'src/components/Button.vue';
+import ExportWizard from 'src/components/ExportWizard.vue';
 import FilterDropdown from 'src/components/FilterDropdown.vue';
+import Modal from 'src/components/Modal.vue';
 import PageHeader from 'src/components/PageHeader.vue';
 import { fyo } from 'src/initFyo';
-import { docsPathMap } from 'src/utils/misc';
-import { docsPath, routeTo } from 'src/utils/ui';
-import List from './List';
+import { shortcutsKey } from 'src/utils/injectionKeys';
+import {
+  docsPathMap,
+  getCreateFiltersFromListViewFilters,
+} from 'src/utils/misc';
+import { docsPathRef } from 'src/utils/refs';
+import { getFormRoute, routeTo } from 'src/utils/ui';
+import { QueryFilter } from 'utils/db/types';
+import { defineComponent, inject, ref } from 'vue';
+import List from './List.vue';
 
-export default {
+export default defineComponent({
   name: 'ListView',
   props: {
-    schemaName: String,
+    schemaName: { type: String, required: true },
     filters: Object,
     pageTitle: { type: String, default: '' },
+  },
+  setup() {
+    return {
+      shortcuts: inject(shortcutsKey),
+      list: ref<InstanceType<typeof List> | null>(null),
+      makeNewDocButton: ref<InstanceType<typeof Button> | null>(null),
+      exportButton: ref<InstanceType<typeof Button> | null>(null),
+      filterDropdown: ref<InstanceType<typeof FilterDropdown> | null>(null),
+    };
   },
   components: {
     PageHeader,
     List,
     Button,
     FilterDropdown,
+    Modal,
+    ExportWizard,
   },
   data() {
-    return { listConfig: undefined };
+    return {
+      listConfig: undefined,
+      openExportModal: false,
+      listFilters: {},
+    } as {
+      listConfig: undefined | ReturnType<typeof getListConfig>;
+      openExportModal: boolean;
+      listFilters: QueryFilter;
+    };
   },
   async activated() {
     if (typeof this.filters === 'object') {
-      this.$refs.filterDropdown.setFilter(this.filters, true);
+      this.filterDropdown?.setFilter(this.filters, true);
     }
 
     this.listConfig = getListConfig(this.schemaName);
-    docsPath.value = docsPathMap[this.schemaName] ?? docsPathMap.Entries;
+    docsPathRef.value =
+      docsPathMap[this.schemaName] ?? docsPathMap.Entries ?? '';
+
+    if (this.fyo.store.isDevelopment) {
+      // @ts-ignore
+      window.lv = this;
+    }
+
+    this.setShortcuts();
   },
   deactivated() {
-    docsPath.value = '';
+    docsPathRef.value = '';
+    this.shortcuts?.delete(this.context);
   },
   methods: {
+    setShortcuts() {
+      if (!this.shortcuts) {
+        return;
+      }
+
+      this.shortcuts.pmod.set(this.context, ['KeyN'], () =>
+        this.makeNewDocButton?.$el.click()
+      );
+      this.shortcuts.pmod.set(this.context, ['KeyE'], () =>
+        this.exportButton?.$el.click()
+      );
+    },
+    updatedData(listFilters: QueryFilter) {
+      this.listFilters = listFilters;
+    },
+    async openDoc(name: string) {
+      const route = getFormRoute(this.schemaName, name);
+      await routeTo(route);
+    },
     async makeNewDoc() {
-      const doc = await fyo.doc.getNewDoc(this.schemaName, this.filters ?? {});
-      const path = this.getFormPath(doc.name);
-
-      routeTo(path);
-      doc.on('afterSync', () => {
-        const path = this.getFormPath(doc.name);
-        this.$router.replace(path);
-      });
-    },
-    applyFilter(filters) {
-      this.$refs.list.updateData(filters);
-    },
-    getFormPath(name) {
-      let path = {
-        path: `/list/${this.schemaName}`,
-        query: {
-          edit: 1,
-          schemaName: this.schemaName,
-          name,
-        },
-      };
-
-      if (this.listConfig.formRoute) {
-        path = this.listConfig.formRoute(name);
+      if (!this.canCreate) {
+        return;
       }
 
-      // Maintain filter if present
-      const currentPath = this.$router.currentRoute.value.path;
-      if (currentPath.slice(0, path?.path?.length ?? 0) === path.path) {
-        path.path = currentPath;
-      }
-
-      return path;
+      const filters = getCreateFiltersFromListViewFilters(this.filters ?? {});
+      const doc = fyo.doc.getNewDoc(this.schemaName, filters);
+      const route = getFormRoute(this.schemaName, doc.name!);
+      await routeTo(route);
+    },
+    applyFilter(filters: QueryFilter) {
+      this.list?.updateData(filters);
     },
   },
   computed: {
-    title() {
-      return this.pageTitle || fyo.schemaMap[this.schemaName].label;
+    context(): string {
+      return 'ListView-' + this.schemaName;
     },
-    fields() {
-      return fyo.schemaMap[this.schemaName].fields;
+    title(): string {
+      if (this.pageTitle) {
+        return this.pageTitle;
+      }
+
+      return fyo.schemaMap[this.schemaName]?.label ?? this.schemaName;
+    },
+    fields(): Field[] {
+      return fyo.schemaMap[this.schemaName]?.fields ?? [];
+    },
+    canCreate(): boolean {
+      return fyo.schemaMap[this.schemaName]?.create !== false;
     },
   },
-};
+});
 
-function getListConfig(schemaName) {
+function getListConfig(schemaName: string) {
   const listConfig = fyo.models[schemaName]?.getListViewSettings?.(fyo);
   if (listConfig?.columns === undefined) {
     return {

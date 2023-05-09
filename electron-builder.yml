@@ -1,15 +1,18 @@
 productName: Frappe Books
 appId: io.frappe.books
-afterSign: build/notarize.js
+asarUnpack: '**/*.node'
 extraResources:
   [
     { from: 'log_creds.txt', to: '../creds/log_creds.txt' },
     { from: 'translations', to: '../translations' },
+    { from: 'templates', to: '../templates' },
   ]
 mac:
   type: distribution
   category: public.app-category.finance
   icon: build/icon.icns
+  notarize:
+    appBundleId: io.frappe.books
   hardenedRuntime: true
   gatekeeperAssess: false
   darkModeSupport: false
@@ -19,6 +22,7 @@ mac:
     - github
 win:
   publisherName: Frappe Technologies Pvt. Ltd.
+  signDlls: true
   icon: build/icon.ico
   publish:
     - github
@@ -27,7 +31,7 @@ win:
     - nsis
 nsis:
   oneClick: false
-  perMachine: true
+  perMachine: false
   allowToChangeInstallationDirectory: true
   installerIcon: build/installericon.ico
   uninstallerIcon: build/uninstallericon.ico

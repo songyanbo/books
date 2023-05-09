@@ -3,12 +3,9 @@ import fs from 'fs/promises';
 import { ConfigFile, ConfigKeys } from 'fyo/core/types';
 import { Main } from 'main';
 import config from 'utils/config';
-import { DatabaseResponse } from 'utils/ipc/types';
+import { BackendResponse } from 'utils/ipc/types';
 import { IPC_CHANNELS } from 'utils/messages';
-
-interface ConfigFilesWithModified extends ConfigFile {
-  modified: string;
-}
+import type { ConfigFilesWithModified } from 'utils/types';
 
 export async function setAndGetCleanedConfigFiles() {
   const files = config.get(ConfigKeys.Files, []) as ConfigFile[];
@@ -54,15 +51,16 @@ export async function getConfigFilesWithModified(files: ConfigFile[]) {
 }
 
 export async function getErrorHandledReponse(func: () => Promise<unknown>) {
-  const response: DatabaseResponse = {};
+  const response: BackendResponse = {};
 
   try {
     response.data = await func();
   } catch (err) {
     response.error = {
-      name: (err as Error).name,
-      message: (err as Error).message,
-      stack: (err as Error).stack,
+      name: (err as NodeJS.ErrnoException).name,
+      message: (err as NodeJS.ErrnoException).message,
+      stack: (err as NodeJS.ErrnoException).stack,
+      code: (err as NodeJS.ErrnoException).code,
     };
   }
 
@@ -71,4 +69,20 @@ export async function getErrorHandledReponse(func: () => Promise<unknown>) {
 
 export function rendererLog(main: Main, ...args: unknown[]) {
   main.mainWindow?.webContents.send(IPC_CHANNELS.CONSOLE_LOG, ...args);
+}
+
+export function isNetworkError(error: Error) {
+  switch (error?.message) {
+    case 'net::ERR_INTERNET_DISCONNECTED':
+    case 'net::ERR_NETWORK_CHANGED':
+    case 'net::ERR_PROXY_CONNECTION_FAILED':
+    case 'net::ERR_CONNECTION_RESET':
+    case 'net::ERR_CONNECTION_CLOSE':
+    case 'net::ERR_NAME_NOT_RESOLVED':
+    case 'net::ERR_TIMED_OUT':
+    case 'net::ERR_CONNECTION_TIMED_OUT':
+      return true;
+    default:
+      return false;
+  }
 }

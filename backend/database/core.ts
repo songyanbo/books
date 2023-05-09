@@ -2,7 +2,7 @@ import {
   CannotCommitError,
   getDbError,
   NotFoundError,
-  ValueError
+  ValueError,
 } from 'fyo/utils/errors';
 import { knex, Knex } from 'knex';
 import {
@@ -11,12 +11,12 @@ import {
   RawValue,
   Schema,
   SchemaMap,
-  TargetField
+  TargetField,
 } from '../../schemas/types';
 import {
   getIsNullOrUndef,
   getRandomString,
-  getValueMapFromList
+  getValueMapFromList,
 } from '../../utils';
 import { DatabaseBase, GetAllOptions, QueryFilter } from '../../utils/db/types';
 import { getDefaultMetaFieldValueMap, sqliteTypeMap, SYSTEM } from '../helpers';
@@ -24,7 +24,7 @@ import {
   ColumnDiff,
   FieldValueMap,
   GetQueryBuilderOptions,
-  SingleValue
+  SingleValue,
 } from './types';
 
 /**
@@ -266,6 +266,12 @@ export default class DatabaseCore extends DatabaseBase {
     )) as FieldValueMap[];
   }
 
+  async deleteAll(schemaName: string, filters: QueryFilter): Promise<number> {
+    const builder = this.knex!(schemaName);
+    this.#applyFiltersToBuilder(builder, filters);
+    return await builder.delete();
+  }
+
   async getSingleValues(
     ...fieldnames: ({ fieldname: string; parent?: string } | string)[]
   ): Promise<SingleValue<RawValue>> {
@@ -342,49 +348,41 @@ export default class DatabaseCore extends DatabaseBase {
     }
   }
 
-  async #tableExists(schemaName: string) {
+  async #tableExists(schemaName: string): Promise<boolean> {
     return await this.knex!.schema.hasTable(schemaName);
   }
 
-  async #singleExists(singleSchemaName: string) {
+  async #singleExists(singleSchemaName: string): Promise<boolean> {
     const res = await this.knex!('SingleValue')
       .count('parent as count')
       .where('parent', singleSchemaName)
       .first();
-    return (res?.count ?? 0) > 0;
+    if (typeof res?.count === 'number') {
+      return res.count > 0;
+    }
+
+    return false;
   }
 
-  async #removeColumns(schemaName: string, targetColumns: string[]) {
-    const fields = this.schemaMap[schemaName]?.fields
-      .filter((f) => f.fieldtype !== FieldTypeEnum.Table && !f.computed)
-      .map((f) => f.fieldname);
-    const tableRows = await this.getAll(schemaName, { fields });
-    this.prestigeTheTable(schemaName, tableRows);
+  async #dropColumns(schemaName: string, targetColumns: string[]) {
+    await this.knex!.schema.table(schemaName, (table) => {
+      table.dropColumns(...targetColumns);
+    });
   }
 
   async prestigeTheTable(schemaName: string, tableRows: FieldValueMap[]) {
-    const max = 200;
-
     // Alter table hacx for sqlite in case of schema change.
     const tempName = `__${schemaName}`;
-    await this.knex!.schema.dropTableIfExists(tempName);
 
+    // Create replacement table
+    await this.knex!.schema.dropTableIfExists(tempName);
     await this.knex!.raw('PRAGMA foreign_keys=OFF');
     await this.#createTable(schemaName, tempName);
 
-    if (tableRows.length > 200) {
-      const fi = Math.floor(tableRows.length / max);
-      for (let i = 0; i <= fi; i++) {
-        const rowSlice = tableRows.slice(i * max, i + 1 * max);
-        if (rowSlice.length === 0) {
-          break;
-        }
-        await this.knex!.batchInsert(tempName, rowSlice);
-      }
-    } else {
-      await this.knex!.batchInsert(tempName, tableRows);
-    }
+    // Insert rows from source table into the replacement table
+    await this.knex!.batchInsert(tempName, tableRows, 200);
 
+    // Replace with the replacement table
     await this.knex!.schema.dropTable(schemaName);
     await this.knex!.schema.renameTable(tempName, schemaName);
     await this.knex!.raw('PRAGMA foreign_keys=ON');
@@ -428,12 +426,21 @@ export default class DatabaseCore extends DatabaseBase {
 
     this.#applyFiltersToBuilder(builder, filters);
 
-    if (options.orderBy) {
-      builder.orderBy(options.orderBy, options.order);
+    const { orderBy, groupBy, order } = options;
+    if (Array.isArray(orderBy)) {
+      builder.orderBy(orderBy.map((column) => ({ column, order })));
     }
 
-    if (options.groupBy) {
-      builder.groupBy(options.groupBy);
+    if (typeof orderBy === 'string') {
+      builder.orderBy(orderBy, order);
+    }
+
+    if (Array.isArray(groupBy)) {
+      builder.groupBy(...groupBy);
+    }
+
+    if (typeof groupBy === 'string') {
+      builder.groupBy(groupBy);
     }
 
     if (options.offset) {
@@ -456,10 +463,35 @@ export default class DatabaseCore extends DatabaseBase {
     // {"date": [">=", "2017-09-09", "<=", "2017-11-01"]}
     // => `date >= 2017-09-09 and date <= 2017-11-01`
 
-    const filtersArray = [];
+    const filtersArray = this.#getFiltersArray(filters);
+    for (const i in filtersArray) {
+      const filter = filtersArray[i];
+      const field = filter[0] as string;
+      const operator = filter[1];
+      const comparisonValue = filter[2];
+      const type = i === '0' ? 'where' : 'andWhere';
 
+      if (operator === '=') {
+        builder[type](field, comparisonValue);
+      } else if (
+        operator === 'in' &&
+        (comparisonValue as (string | null)[]).includes(null)
+      ) {
+        const nonNulls = (comparisonValue as (string | null)[]).filter(
+          Boolean
+        ) as string[];
+        builder[type](field, operator, nonNulls).orWhere(field, null);
+      } else {
+        builder[type](field, operator as string, comparisonValue as string);
+      }
+    }
+  }
+
+  #getFiltersArray(filters: QueryFilter) {
+    const filtersArray = [];
     for (const field in filters) {
       const value = filters[field];
+
       let operator: string | number = '=';
       let comparisonValue = value as string | number | (string | number)[];
 
@@ -489,17 +521,7 @@ export default class DatabaseCore extends DatabaseBase {
       }
     }
 
-    filtersArray.map((filter) => {
-      const field = filter[0] as string;
-      const operator = filter[1];
-      const comparisonValue = filter[2];
-
-      if (operator === '=') {
-        builder.where(field, comparisonValue);
-      } else {
-        builder.where(field, operator as string, comparisonValue as string);
-      }
-    });
+    return filtersArray;
   }
 
   async #getColumnDiff(schemaName: string): Promise<ColumnDiff> {
@@ -593,21 +615,23 @@ export default class DatabaseCore extends DatabaseBase {
     const diff: ColumnDiff = await this.#getColumnDiff(schemaName);
     const newForeignKeys: Field[] = await this.#getNewForeignKeys(schemaName);
 
-    return this.knex!.schema.table(schemaName, (table) => {
-      if (diff.added.length) {
-        for (const field of diff.added) {
-          this.#buildColumnForTable(table, field);
-        }
+    await this.knex!.schema.table(schemaName, (table) => {
+      if (!diff.added.length) {
+        return;
       }
 
-      if (diff.removed.length) {
-        this.#removeColumns(schemaName, diff.removed);
-      }
-    }).then(() => {
-      if (newForeignKeys.length) {
-        return this.#addForeignKeys(schemaName, newForeignKeys);
+      for (const field of diff.added) {
+        this.#buildColumnForTable(table, field);
       }
     });
+
+    if (diff.removed.length) {
+      await this.#dropColumns(schemaName, diff.removed);
+    }
+
+    if (newForeignKeys.length) {
+      await this.#addForeignKeys(schemaName, newForeignKeys);
+    }
   }
 
   async #createTable(schemaName: string, tableName?: string) {
@@ -687,34 +711,8 @@ export default class DatabaseCore extends DatabaseBase {
   }
 
   async #addForeignKeys(schemaName: string, newForeignKeys: Field[]) {
-    await this.knex!.raw('PRAGMA foreign_keys=OFF');
-    await this.knex!.raw('BEGIN TRANSACTION');
-
-    const tempName = 'TEMP' + schemaName;
-
-    // create temp table
-    await this.#createTable(schemaName, tempName);
-
-    try {
-      // copy from old to new table
-      await this.knex!(tempName).insert(this.knex!.select().from(schemaName));
-    } catch (err) {
-      await this.knex!.raw('ROLLBACK');
-      await this.knex!.raw('PRAGMA foreign_keys=ON');
-
-      const rows = await this.knex!.select().from(schemaName);
-      await this.prestigeTheTable(schemaName, rows);
-      return;
-    }
-
-    // drop old table
-    await this.knex!.schema.dropTable(schemaName);
-
-    // rename new table
-    await this.knex!.schema.renameTable(tempName, schemaName);
-
-    await this.knex!.raw('COMMIT');
-    await this.knex!.raw('PRAGMA foreign_keys=ON');
+    const tableRows = await this.knex!.select().from(schemaName);
+    await this.prestigeTheTable(schemaName, tableRows);
   }
 
   async #loadChildren(

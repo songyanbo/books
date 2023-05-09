@@ -50,8 +50,8 @@ function removeFields(schemaMap: SchemaMap): SchemaMap {
         (fn) => fn !== fieldname
       );
 
-      if (schema.inlineEditDisplayField === fieldname) {
-        delete schema.inlineEditDisplayField;
+      if (schema.linkDisplayField === fieldname) {
+        delete schema.linkDisplayField;
       }
     }
 
@@ -127,7 +127,7 @@ function addNameField(schemaMap: SchemaMap) {
       continue;
     }
 
-    schema.fields.push(NAME_FIELD as Field);
+    schema.fields.unshift(NAME_FIELD as Field);
   }
 }
 

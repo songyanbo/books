@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col overflow-y-hidden">
-    <PageHeader :title="t`Setup Your Workspace`" />
-    <div class="flex-1 overflow-y-auto overflow-x-hidden">
+    <PageHeader :title="t`Set Up Your Workspace`" />
+    <div class="flex-1 overflow-y-auto overflow-x-hidden custom-scroll">
       <div
         class="p-4 border-b"
         v-for="section in sections"
@@ -47,13 +47,13 @@
                   @click="handleAction(item)"
                 >
                   <span class="text-base text-white">
-                    {{ item.actionLabel || t`Setup` }}
+                    {{ item.actionLabel || t`Set Up` }}
                   </span>
                 </Button>
                 <Button
                   v-if="item.documentation"
                   class="leading-tight"
-                  :class="{ 'ml-4': item.action }"
+                  :class="{ 'ms-4': item.action }"
                   @click="handleDocumentation(item)"
                 >
                   <span class="text-base">
@@ -77,7 +77,6 @@ import { fyo } from 'src/initFyo';
 import { getGetStartedConfig } from 'src/utils/getStartedConfig';
 import { openLink } from 'src/utils/ipcCalls';
 import { h } from 'vue';
-
 export default {
   name: 'GetStarted',
   components: {
@@ -117,8 +116,8 @@ export default {
       }
 
       switch (key) {
-        case 'Invoice':
-          await this.updateChecks({ invoiceSetup: true });
+        case 'Print':
+          await this.updateChecks({ printSetup: true });
           break;
         case 'General':
           await this.updateChecks({ companySetup: true });

@@ -1,15 +1,14 @@
-import { ModelNameEnum } from 'models/types';
 import ChartOfAccounts from 'src/pages/ChartOfAccounts.vue';
+import CommonForm from 'src/pages/CommonForm/CommonForm.vue';
 import Dashboard from 'src/pages/Dashboard/Dashboard.vue';
-import DataImport from 'src/pages/DataImport.vue';
 import GetStarted from 'src/pages/GetStarted.vue';
-import InvoiceForm from 'src/pages/InvoiceForm.vue';
-import JournalEntryForm from 'src/pages/JournalEntryForm.vue';
+import ImportWizard from 'src/pages/ImportWizard.vue';
 import ListView from 'src/pages/ListView/ListView.vue';
 import PrintView from 'src/pages/PrintView/PrintView.vue';
 import QuickEditForm from 'src/pages/QuickEditForm.vue';
 import Report from 'src/pages/Report.vue';
 import Settings from 'src/pages/Settings/Settings.vue';
+import TemplateBuilder from 'src/pages/TemplateBuilder/TemplateBuilder.vue';
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
 
 const routes: RouteRecordRaw[] = [
@@ -22,38 +21,22 @@ const routes: RouteRecordRaw[] = [
     component: GetStarted,
   },
   {
-    path: '/edit/JournalEntry/:name',
-    name: 'JournalEntryForm',
+    path: `/edit/:schemaName/:name`,
+    name: `CommonForm`,
     components: {
-      default: JournalEntryForm,
+      default: CommonForm,
       edit: QuickEditForm,
     },
     props: {
-      default: (route) => {
-        // for sidebar item active state
-        route.params.schemaName = 'JournalEntry';
-        return {
-          schemaName: 'JournalEntry',
-          name: route.params.name,
-        };
-      },
+      default: (route) => ({
+        schemaName: route.params.schemaName,
+        name: route.params.name,
+      }),
       edit: (route) => route.query,
     },
   },
   {
-    path: '/edit/:schemaName/:name',
-    name: 'InvoiceForm',
-    components: {
-      default: InvoiceForm,
-      edit: QuickEditForm,
-    },
-    props: {
-      default: true,
-      edit: (route) => route.query,
-    },
-  },
-  {
-    path: '/list/:schemaName/:fieldname?/:value?/:pageTitle?',
+    path: '/list/:schemaName/:pageTitle?',
     name: 'ListView',
     components: {
       default: ListView,
@@ -61,23 +44,22 @@ const routes: RouteRecordRaw[] = [
     },
     props: {
       default: (route) => {
-        const { schemaName, fieldname, value, pageTitle } = route.params;
-        let { filters } = route.params;
+        const { schemaName } = route.params;
+        const pageTitle = route.params.pageTitle ?? '';
 
-        if (filters === undefined && fieldname && value) {
-          // @ts-ignore
-          filters = { [fieldname as string]: value };
+        const filters = {};
+        const filterString = route.query.filters;
+        if (typeof filterString === 'string') {
+          Object.assign(filters, JSON.parse(filterString));
         }
 
         return {
           schemaName,
           filters,
-          pageTitle: pageTitle ?? '',
+          pageTitle,
         };
       },
-      edit: (route) => {
-        return route.query;
-      },
+      edit: (route) => route.query,
     },
   },
   {
@@ -105,32 +87,29 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: '/data-import',
-    name: 'Data Import',
-    component: DataImport,
+    path: '/import-wizard',
+    name: 'Import Wizard',
+    component: ImportWizard,
+  },
+  {
+    path: '/template-builder/:name',
+    name: 'Template Builder',
+    component: TemplateBuilder,
+    props: true,
   },
   {
     path: '/settings',
     name: 'Settings',
-    component: Settings,
-    props: true,
+    components: {
+      default: Settings,
+      edit: QuickEditForm,
+    },
+    props: {
+      default: true,
+      edit: (route) => route.query,
+    },
   },
 ];
 
-export function getEntryRoute(schemaName: string, name: string) {
-  if (
-    [
-      ModelNameEnum.SalesInvoice,
-      ModelNameEnum.PurchaseInvoice,
-      ModelNameEnum.JournalEntry,
-    ].includes(schemaName as ModelNameEnum)
-  ) {
-    return `/edit/${schemaName}/${name}`;
-  }
-
-  return `/list/${schemaName}?edit=1&schemaName=${schemaName}&name=${name}`;
-}
-
 const router = createRouter({ routes, history: createWebHistory() });
-
 export default router;

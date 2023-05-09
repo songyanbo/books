@@ -1,20 +1,37 @@
 import Account from './app/Account.json';
 import AccountingLedgerEntry from './app/AccountingLedgerEntry.json';
 import AccountingSettings from './app/AccountingSettings.json';
-import Misc from './app/Misc.json';
 import Address from './app/Address.json';
+import Batch from './app/Batch.json';
 import Color from './app/Color.json';
-import CompanySettings from './app/CompanySettings.json';
 import Currency from './app/Currency.json';
+import Defaults from './app/Defaults.json';
 import GetStarted from './app/GetStarted.json';
+import InventorySettings from './app/inventory/InventorySettings.json';
+import Location from './app/inventory/Location.json';
+import PurchaseReceipt from './app/inventory/PurchaseReceipt.json';
+import PurchaseReceiptItem from './app/inventory/PurchaseReceiptItem.json';
+import SerialNumber from './app/inventory/SerialNumber.json';
+import Shipment from './app/inventory/Shipment.json';
+import ShipmentItem from './app/inventory/ShipmentItem.json';
+import StockLedgerEntry from './app/inventory/StockLedgerEntry.json';
+import StockMovement from './app/inventory/StockMovement.json';
+import StockMovementItem from './app/inventory/StockMovementItem.json';
+import StockTransfer from './app/inventory/StockTransfer.json';
+import StockTransferItem from './app/inventory/StockTransferItem.json';
+import UOMConversionItem from './app/inventory/UOMConversionItem.json';
+import Invoice from './app/Invoice.json';
+import InvoiceItem from './app/InvoiceItem.json';
 import Item from './app/Item.json';
 import JournalEntry from './app/JournalEntry.json';
 import JournalEntryAccount from './app/JournalEntryAccount.json';
+import Misc from './app/Misc.json';
 import NumberSeries from './app/NumberSeries.json';
 import Party from './app/Party.json';
 import Payment from './app/Payment.json';
 import PaymentFor from './app/PaymentFor.json';
 import PrintSettings from './app/PrintSettings.json';
+import PrintTemplate from './app/PrintTemplate.json';
 import PurchaseInvoice from './app/PurchaseInvoice.json';
 import PurchaseInvoiceItem from './app/PurchaseInvoiceItem.json';
 import SalesInvoice from './app/SalesInvoice.json';
@@ -50,13 +67,14 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   Misc as Schema,
   SetupWizard as Schema,
   GetStarted as Schema,
+  PrintTemplate as Schema,
 
   Color as Schema,
   Currency as Schema,
+  Defaults as Schema,
   NumberSeries as Schema,
 
   PrintSettings as Schema,
-  CompanySettings as Schema,
 
   Account as Schema,
   AccountingSettings as Schema,
@@ -66,6 +84,7 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   Address as Schema,
   Item as Schema,
   UOM as Schema,
+  UOMConversionItem as Schema,
 
   Payment as Schema,
   PaymentFor as Schema,
@@ -73,13 +92,31 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   JournalEntry as Schema,
   JournalEntryAccount as Schema,
 
-  PurchaseInvoice as Schema,
-  PurchaseInvoiceItem as Schema,
-
+  Invoice as Schema,
   SalesInvoice as Schema,
-  SalesInvoiceItem as Schema,
+  PurchaseInvoice as Schema,
+
+  InvoiceItem as Schema,
+  SalesInvoiceItem as SchemaStub,
+  PurchaseInvoiceItem as SchemaStub,
 
   Tax as Schema,
   TaxDetail as Schema,
   TaxSummary as Schema,
+
+  InventorySettings as Schema,
+  Location as Schema,
+  StockLedgerEntry as Schema,
+  StockMovement as Schema,
+  StockMovementItem as Schema,
+
+  StockTransfer as Schema,
+  StockTransferItem as Schema,
+  Shipment as Schema,
+  ShipmentItem as Schema,
+  PurchaseReceipt as Schema,
+  PurchaseReceiptItem as Schema,
+
+  Batch as Schema,
+  SerialNumber as Schema,
 ];

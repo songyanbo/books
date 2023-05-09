@@ -1,24 +1,15 @@
 <template>
   <Row
     :ratio="ratio"
-    class="
-      w-full
-      px-2
-      border-b
-      hover:bg-gray-50
-      group
-      flex
-      items-center
-      justify-center
-      h-row-mid
-    "
+    class="w-full px-2 group flex items-center justify-center h-row-mid"
+    :class="readOnly ? '' : 'hover:bg-gray-25'"
   >
     <!-- Index or Remove button -->
-    <div class="flex items-center pl-2 text-gray-600">
+    <div class="flex items-center ps-2 text-gray-600">
       <span class="hidden" :class="{ 'group-hover:inline-block': !readOnly }">
         <feather-icon
           name="x"
-          class="w-4 h-4 -ml-1 cursor-pointer"
+          class="w-4 h-4 -ms-1 cursor-pointer"
           :button="true"
           @click="$emit('remove')"
         />
@@ -32,13 +23,10 @@
     <FormControl
       v-for="df in tableFields"
       :size="size"
-      :read-only="readOnly"
-      :input-class="{ 'text-right': isNumeric(df), 'bg-transparent': true }"
       :key="df.fieldname"
       :df="df"
       :value="row[df.fieldname]"
       @change="(value) => onChange(df, value)"
-      @new-doc="(doc) => row.set(df.fieldname, doc.name)"
     />
     <Button
       :icon="true"
@@ -52,7 +40,7 @@
 
     <!-- Error Display -->
     <div
-      class="text-xs text-red-600 pl-2 col-span-full relative"
+      class="text-xs text-red-600 ps-2 col-span-full relative"
       style="bottom: 0.75rem; height: 0px"
       v-if="hasErrors"
     >
@@ -64,6 +52,7 @@
 import { Doc } from 'fyo/model/doc';
 import Row from 'src/components/Row.vue';
 import { getErrorMessage } from 'src/utils';
+import { computed, nextTick } from 'vue';
 import Button from '../Button.vue';
 import FormControl from './FormControl.vue';
 
@@ -81,7 +70,7 @@ export default {
       default: false,
     },
   },
-  emits: ['remove'],
+  emits: ['remove', 'change'],
   components: {
     Row,
     FormControl,
@@ -93,9 +82,7 @@ export default {
   },
   provide() {
     return {
-      schemaName: this.row.schemaName,
-      name: this.row.name,
-      doc: this.row,
+      doc: computed(() => this.row),
     };
   },
   computed: {
@@ -104,15 +91,19 @@ export default {
     },
   },
   methods: {
-    onChange(df, value) {
-      if (value == null) {
-        return;
-      }
+    async onChange(df, value) {
+      const fieldname = df.fieldname;
+      this.errors[fieldname] = null;
+      const oldValue = this.row[fieldname];
 
-      this.errors[df.fieldname] = null;
-      this.row.set(df.fieldname, value).catch((e) => {
-        this.errors[df.fieldname] = getErrorMessage(e, this.row);
-      });
+      try {
+        await this.row.set(fieldname, value);
+        this.$emit('change', df, value);
+      } catch (e) {
+        this.errors[fieldname] = getErrorMessage(e, this.row);
+        this.row[fieldname] = '';
+        nextTick(() => (this.row[fieldname] = oldValue));
+      }
     },
     getErrorString() {
       return Object.values(this.errors).filter(Boolean).join(' ');

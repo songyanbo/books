@@ -4,34 +4,36 @@ import { groupBy } from 'lodash';
 import { ModelNameEnum } from 'models/types';
 import { reports } from 'reports';
 import { OptionField } from 'schemas/types';
-import { getEntryRoute } from 'src/router';
+import { createFilters, routeFilters } from 'src/utils/filters';
 import { GetAllOptions } from 'utils/db/types';
+import { safeParseFloat } from 'utils/index';
+import { RouteLocationRaw } from 'vue-router';
 import { fuzzyMatch } from '.';
-import { routeTo } from './ui';
+import { getFormRoute, routeTo } from './ui';
 
-export const searchGroups = ['Docs', 'List', 'Create', 'Report', 'Page'];
-enum SearchGroupEnum {
-  'List' = 'List',
-  'Report' = 'Report',
-  'Create' = 'Create',
-  'Page' = 'Page',
-  'Docs' = 'Docs',
-}
+export const searchGroups = [
+  'Docs',
+  'List',
+  'Create',
+  'Report',
+  'Page',
+] as const;
 
-type SearchGroup = keyof typeof SearchGroupEnum;
+export type SearchGroup = typeof searchGroups[number];
 interface SearchItem {
   label: string;
-  group: SearchGroup;
+  group: Exclude<SearchGroup, 'Docs'>;
   route?: string;
   action?: () => void;
 }
 
-interface DocSearchItem extends SearchItem {
+interface DocSearchItem extends Omit<SearchItem, 'group'> {
+  group: 'Docs';
   schemaLabel: string;
   more: string[];
 }
 
-type SearchItems = (DocSearchItem | SearchItem)[];
+export type SearchItems = (DocSearchItem | SearchItem)[];
 
 interface Searchable {
   needsUpdate: boolean;
@@ -70,109 +72,98 @@ export function getGroupLabelMap() {
   };
 }
 
-async function openQuickEditDoc(schemaName: string, fyo: Fyo) {
-  await routeTo(`/list/${schemaName}`);
-  const doc = await fyo.doc.getNewDoc(schemaName);
-  const { openQuickEdit } = await import('src/utils/ui');
-
-  await openQuickEdit({
-    schemaName,
-    name: doc.name as string,
-  });
-}
-
-async function openFormEditDoc(schemaName: string, fyo: Fyo) {
-  const doc = fyo.doc.getNewDoc(schemaName);
-  const name = doc.name;
-
-  routeTo(`/edit/${schemaName}/${name}`);
+function getCreateAction(fyo: Fyo, schemaName: string, initData?: RawValueMap) {
+  return async function action() {
+    const doc = fyo.doc.getNewDoc(schemaName, initData);
+    const route = getFormRoute(schemaName, doc.name!);
+    await routeTo(route);
+  };
 }
 
 function getCreateList(fyo: Fyo): SearchItem[] {
-  const quickEditCreateList = [
-    ModelNameEnum.Item,
-    ModelNameEnum.Party,
-    ModelNameEnum.Payment,
-  ].map(
-    (schemaName) =>
-      ({
-        label: fyo.schemaMap[schemaName]?.label,
-        group: 'Create',
-        action() {
-          openQuickEditDoc(schemaName, fyo);
-        },
-      } as SearchItem)
-  );
-
+  const hasInventory = fyo.doc.singles.AccountingSettings?.enableInventory;
   const formEditCreateList = [
     ModelNameEnum.SalesInvoice,
     ModelNameEnum.PurchaseInvoice,
     ModelNameEnum.JournalEntry,
+    ...(hasInventory
+      ? [
+          ModelNameEnum.Shipment,
+          ModelNameEnum.PurchaseReceipt,
+          ModelNameEnum.StockMovement,
+        ]
+      : []),
   ].map(
     (schemaName) =>
       ({
         label: fyo.schemaMap[schemaName]?.label,
         group: 'Create',
-        action() {
-          openFormEditDoc(schemaName, fyo);
-        },
+        action: getCreateAction(fyo, schemaName),
       } as SearchItem)
   );
 
   const filteredCreateList = [
     {
-      label: t`Customers`,
+      label: t`Sales Payment`,
+      schemaName: ModelNameEnum.Payment,
+      create: createFilters.SalesPayments,
+    },
+    {
+      label: t`Purchase Payment`,
+      schemaName: ModelNameEnum.Payment,
+      create: createFilters.PurchasePayments,
+    },
+    {
+      label: t`Customer`,
       schemaName: ModelNameEnum.Party,
-      filter: { role: 'Customer' },
+      create: createFilters.Customers,
     },
     {
-      label: t`Suppliers`,
+      label: t`Supplier`,
       schemaName: ModelNameEnum.Party,
-      filter: { role: 'Supplier' },
+      create: createFilters.Suppliers,
     },
     {
-      label: t`Sales Items`,
-      schemaName: ModelNameEnum.Item,
-      filter: { for: 'Sales' },
+      label: t`Party`,
+      schemaName: ModelNameEnum.Party,
+      create: createFilters.Party,
     },
     {
-      label: t`Purchase Items`,
+      label: t`Sales Item`,
       schemaName: ModelNameEnum.Item,
-      filter: { for: 'Purchases' },
+      create: createFilters.SalesItems,
     },
     {
-      label: t`Common Items`,
+      label: t`Purchase Item`,
       schemaName: ModelNameEnum.Item,
-      filter: { for: 'Both' },
+      create: createFilters.PurchaseItems,
     },
-  ].map(({ label, filter, schemaName }) => {
-    const fk = Object.keys(filter)[0] as 'for' | 'role';
-    const ep = `${fk}/${filter[fk]}`;
-
-    const route = `/list/${schemaName}/${ep}/${label}`;
+    {
+      label: t`Item`,
+      schemaName: ModelNameEnum.Item,
+      create: createFilters.Items,
+    },
+  ].map(({ label, create, schemaName }) => {
     return {
       label,
       group: 'Create',
-      async action() {
-        await routeTo(route);
-        const doc = await fyo.doc.getNewDoc(schemaName, filter);
-        const { openQuickEdit } = await import('src/utils/ui');
-        await openQuickEdit({
-          schemaName,
-          name: doc.name as string,
-        });
-      },
+      action: getCreateAction(fyo, schemaName, create),
     } as SearchItem;
   });
 
-  return [quickEditCreateList, formEditCreateList, filteredCreateList].flat();
+  return [formEditCreateList, filteredCreateList].flat();
 }
 
 function getReportList(fyo: Fyo): SearchItem[] {
   const hasGstin = !!fyo.singles?.AccountingSettings?.gstin;
+  const hasInventory = !!fyo.singles?.AccountingSettings?.enableInventory;
   return Object.keys(reports)
     .filter((r) => {
       const report = reports[r];
+      if (report.isInventory && !hasInventory) {
+        return false;
+      }
+
       if (report.title.startsWith('GST') && !hasGstin) {
         return false;
       }
@@ -191,17 +182,37 @@ function getReportList(fyo: Fyo): SearchItem[] {
 function getListViewList(fyo: Fyo): SearchItem[] {
   let schemaNames = [
     ModelNameEnum.Account,
-    ModelNameEnum.Party,
-    ModelNameEnum.Payment,
     ModelNameEnum.JournalEntry,
     ModelNameEnum.PurchaseInvoice,
     ModelNameEnum.SalesInvoice,
     ModelNameEnum.Tax,
+    ModelNameEnum.UOM,
+    ModelNameEnum.Address,
+    ModelNameEnum.AccountingLedgerEntry,
+    ModelNameEnum.Currency,
+    ModelNameEnum.NumberSeries,
   ];
+
+  const hasInventory = fyo.doc.singles.AccountingSettings?.enableInventory;
+  if (hasInventory) {
+    schemaNames.push(
+      ModelNameEnum.StockMovement,
+      ModelNameEnum.Shipment,
+      ModelNameEnum.PurchaseReceipt,
+      ModelNameEnum.Location,
+      ModelNameEnum.StockLedgerEntry
+    );
+  }
+
+  const hasBatch = fyo.doc.singles.InventorySettings?.enableBatches;
+  if (hasBatch) {
+    schemaNames.push(ModelNameEnum.Batch);
+  }
 
   if (fyo.store.isDevelopment) {
     schemaNames = Object.keys(fyo.schemaMap) as ModelNameEnum[];
   }
+
   const standardLists = schemaNames
     .map((s) => fyo.schemaMap[s])
     .filter((s) => s && !s.isChild && !s.isSingle)
@@ -215,29 +226,52 @@ function getListViewList(fyo: Fyo): SearchItem[] {
     );
 
   const filteredLists = [
-    { label: t`Customers`, route: `/list/Party/role/Customer/${t`Customers`}` },
-    { label: t`Suppliers`, route: `/list/Party/role/Supplier/${t`Suppliers`}` },
+    {
+      label: t`Customers`,
+      route: `/list/Party/${t`Customers`}`,
+      filters: routeFilters.Customers,
+    },
+    {
+      label: t`Suppliers`,
+      route: `/list/Party/${t`Suppliers`}`,
+      filters: routeFilters.Suppliers,
+    },
+    {
+      label: t`Party`,
+      route: `/list/Party/${t`Party`}`,
+      filters: routeFilters.Party,
+    },
     {
       label: t`Sales Items`,
-      route: `/list/Item/for/Sales/${t`Sales Items`}`,
+      route: `/list/Item/${t`Sales Items`}`,
+      filters: routeFilters.SalesItems,
     },
     {
       label: t`Sales Payments`,
-      route: `/list/Payment/paymentType/Receive/${t`Sales Payments`}`,
+      route: `/list/Payment/${t`Sales Payments`}`,
+      filters: routeFilters.SalesPayments,
     },
     {
       label: t`Purchase Items`,
-      route: `/list/Item/for/Purchases/${t`Purchase Items`}`,
+      route: `/list/Item/${t`Purchase Items`}`,
+      filters: routeFilters.PurchaseItems,
     },
     {
-      label: t`Common Items`,
-      route: `/list/Item/for/Both/${t`Common Items`}`,
+      label: t`Items`,
+      route: `/list/Item/${t`Items`}`,
+      filters: routeFilters.Items,
     },
     {
       label: t`Purchase Payments`,
-      route: `/list/Payment/paymentType/Pay/${t`Purchase Payments`}`,
+      route: `/list/Payment/${t`Purchase Payments`}`,
+      filters: routeFilters.PurchasePayments,
     },
-  ].map((i) => ({ ...i, group: 'List' } as SearchItem));
+  ].map((i) => {
+    const label = i.label;
+    const route = encodeURI(`${i.route}?filters=${JSON.stringify(i.filters)}`);
+
+    return { label, route, group: 'List' } as SearchItem;
+  });
 
   return [standardLists, filteredLists].flat();
 }
@@ -255,8 +289,8 @@ function getSetupList(): SearchItem[] {
       group: 'Page',
     },
     {
-      label: t`Data Import`,
-      route: '/data-import',
+      label: t`Import Wizard`,
+      route: '/import-wizard',
       group: 'Page',
     },
     {
@@ -312,6 +346,9 @@ export class Search {
     [ModelNameEnum.SalesInvoice]: 125,
     [ModelNameEnum.PurchaseInvoice]: 100,
     [ModelNameEnum.Payment]: 75,
+    [ModelNameEnum.StockMovement]: 75,
+    [ModelNameEnum.Shipment]: 75,
+    [ModelNameEnum.PurchaseReceipt]: 75,
     [ModelNameEnum.Item]: 50,
     [ModelNameEnum.Party]: 50,
     [ModelNameEnum.JournalEntry]: 50,
@@ -418,7 +455,7 @@ export class Search {
     const totalChildKeywords = Object.values(this.searchables)
       .filter((s) => s.isChild)
       .map((s) => this.keywords[s.schemaName]?.length ?? 0)
-      .reduce((a, b) => a + b);
+      .reduce((a, b) => a + b, 0);
 
     if (totalChildKeywords > 2_000) {
       this.set('skipTables', true);
@@ -520,10 +557,12 @@ export class Search {
       keys.push('0');
     }
 
-    keys.sort((a, b) => parseFloat(b) - parseFloat(a));
+    keys.sort((a, b) => safeParseFloat(b) - safeParseFloat(a));
     const array: SearchItems = [];
     for (const key of keys) {
-      this._pushDocSearchItems(groupedKeywords[key], array, input);
+      const keywords = groupedKeywords[key] ?? [];
+
+      this._pushDocSearchItems(keywords, array, input);
       if (key === '0') {
         this._pushNonDocSearchItems(array, input);
       }
@@ -542,10 +581,7 @@ export class Search {
       return;
     }
 
-    const subArray = this._getSubSortedArray(
-      keywords,
-      input
-    ) as DocSearchItem[];
+    const subArray = this._getSubSortedArray(keywords, input);
     array.push(...subArray);
   }
 
@@ -553,7 +589,7 @@ export class Search {
     const filtered = this._nonDocSearchList.filter(
       (si) => this.filters.groupFilters[si.group]
     );
-    const subArray = this._getSubSortedArray(filtered, input) as SearchItem[];
+    const subArray = this._getSubSortedArray(filtered, input);
     array.push(...subArray);
   }
 
@@ -565,36 +601,66 @@ export class Search {
       [];
 
     for (const item of items) {
-      const isSearchItem = !!(item as SearchItem).group;
-
-      if (!input && isSearchItem) {
-        subArray.push({ item: item as SearchItem, distance: 0 });
+      const subArrayItem = this._getSubArrayItem(item, input);
+      if (!subArrayItem) {
         continue;
       }
 
-      if (!input) {
-        continue;
-      }
-
-      const values = this._getValueList(item).filter(Boolean);
-      const { isMatch, distance } = this._getMatchAndDistance(input, values);
-
-      if (!isMatch) {
-        continue;
-      }
-
-      if (isSearchItem) {
-        subArray.push({ item: item as SearchItem, distance });
-      } else {
-        subArray.push({
-          item: this._getDocSearchItemFromKeyword(item as Keyword),
-          distance,
-        });
-      }
+      subArray.push(subArrayItem);
     }
 
     subArray.sort((a, b) => a.distance - b.distance);
     return subArray.map(({ item }) => item);
+  }
+
+  _getSubArrayItem(item: SearchItem | Keyword, input?: string) {
+    if (isSearchItem(item)) {
+      return this._getSubArrayItemFromSearchItem(item, input);
+    }
+
+    if (!input) {
+      return null;
+    }
+
+    return this._getSubArrayItemFromKeyword(item, input);
+  }
+
+  _getSubArrayItemFromSearchItem(item: SearchItem, input?: string) {
+    if (!input) {
+      return { item, distance: 0 };
+    }
+
+    const values = this._getValueListFromSearchItem(item).filter(Boolean);
+    const { isMatch, distance } = this._getMatchAndDistance(input, values);
+
+    if (!isMatch) {
+      return null;
+    }
+
+    return { item, distance };
+  }
+
+  _getValueListFromSearchItem({ label, group }: SearchItem): string[] {
+    return [label, group];
+  }
+
+  _getSubArrayItemFromKeyword(item: Keyword, input: string) {
+    const values = this._getValueListFromKeyword(item).filter(Boolean);
+    const { isMatch, distance } = this._getMatchAndDistance(input, values);
+
+    if (!isMatch) {
+      return null;
+    }
+
+    return {
+      item: this._getDocSearchItemFromKeyword(item),
+      distance,
+    };
+  }
+
+  _getValueListFromKeyword({ values, meta }: Keyword): string[] {
+    const schemaLabel = meta.schemaName as string;
+    return [values, schemaLabel].flat();
   }
 
   _getMatchAndDistance(input: string, values: string[]) {
@@ -631,17 +697,6 @@ export class Search {
     return { isMatch, distance };
   }
 
-  _getValueList(item: SearchItem | Keyword): string[] {
-    const { label, group } = item as SearchItem;
-    if (group && group !== 'Docs') {
-      return [label, group];
-    }
-
-    const { values, meta } = item as Keyword;
-    const schemaLabel = meta.schemaName as string;
-    return [values, schemaLabel].flat();
-  }
-
   _getDocSearchItemFromKeyword(keyword: Keyword): DocSearchItem {
     const schemaName = keyword.meta.schemaName as string;
     const schemaLabel = this.fyo.schemaMap[schemaName]?.label!;
@@ -657,13 +712,13 @@ export class Search {
     };
   }
 
-  _getRouteFromKeyword(keyword: Keyword): string {
+  _getRouteFromKeyword(keyword: Keyword): RouteLocationRaw {
     const { parent, parentSchemaName, schemaName } = keyword.meta;
     if (parent && parentSchemaName) {
-      return getEntryRoute(parentSchemaName as string, parent as string);
+      return getFormRoute(parentSchemaName as string, parent as string);
     }
 
-    return getEntryRoute(schemaName as string, keyword.values[0]);
+    return getFormRoute(schemaName as string, keyword.values[0]);
   }
 
   _getGroupedKeywords() {
@@ -739,7 +794,7 @@ export class Search {
   }
 
   _setKeywords(maps: RawValueMap[], searchable: Searchable) {
-    if (!maps.length) {
+    if (!maps?.length) {
       return;
     }
 
@@ -811,4 +866,8 @@ export class Search {
       }
     }
   }
+}
+
+function isSearchItem(item: SearchItem | Keyword): item is SearchItem {
+  return !!(item as SearchItem).group;
 }

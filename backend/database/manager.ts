@@ -1,9 +1,9 @@
-import { constants } from 'fs';
 import fs from 'fs/promises';
+import { DatabaseError } from 'fyo/utils/errors';
 import path from 'path';
 import { DatabaseDemuxBase, DatabaseMethod } from 'utils/db/types';
 import { getSchemas } from '../../schemas';
-import { databaseMethodSet } from '../helpers';
+import { checkFileAccess, databaseMethodSet, unlinkIfExists } from '../helpers';
 import patches from '../patches';
 import { BespokeQueries } from './bespoke';
 import DatabaseCore from './core';
@@ -22,7 +22,7 @@ export class DatabaseManager extends DatabaseDemuxBase {
   }
 
   async createNewDatabase(dbPath: string, countryCode: string) {
-    await this.#unlinkIfExists(dbPath);
+    await unlinkIfExists(dbPath);
     return await this.connectToDatabase(dbPath, countryCode);
   }
 
@@ -60,14 +60,29 @@ export class DatabaseManager extends DatabaseDemuxBase {
 
     try {
       await this.#runPatchesAndMigrate();
-    } catch (err) {
-      console.error(err);
-      await this.db!.close();
-      copyPath && (await fs.copyFile(copyPath, dbPath));
-      throw err;
+    } catch (error) {
+      await this.#handleFailedMigration(error, dbPath, copyPath);
     } finally {
-      copyPath && (await fs.unlink(copyPath));
+      await unlinkIfExists(copyPath);
     }
+  }
+
+  async #handleFailedMigration(
+    error: unknown,
+    dbPath: string,
+    copyPath: string | null
+  ) {
+    await this.db!.close();
+
+    if (copyPath && (await checkFileAccess(copyPath))) {
+      await fs.copyFile(copyPath, dbPath);
+    }
+
+    if (error instanceof Error) {
+      error.message = `failed migration\n${error.message}`;
+    }
+
+    throw error;
   }
 
   async #runPatchesAndMigrate() {
@@ -122,23 +137,12 @@ export class DatabaseManager extends DatabaseDemuxBase {
     }
 
     if (!BespokeQueries.hasOwnProperty(method)) {
-      return;
+      throw new DatabaseError(`invalid bespoke db function ${method}`);
     }
 
-    // @ts-ignore
-    const queryFunction: BespokeFunction = BespokeQueries[method];
+    const queryFunction: BespokeFunction =
+      BespokeQueries[method as keyof BespokeFunction];
     return await queryFunction(this.db!, ...args);
-  }
-
-  async #unlinkIfExists(dbPath: string) {
-    const exists = await fs
-      .access(dbPath, constants.W_OK)
-      .then(() => true)
-      .catch(() => false);
-
-    if (exists) {
-      fs.unlink(dbPath);
-    }
   }
 
   async #getIsFirstRun(): Promise<boolean> {
@@ -160,7 +164,13 @@ export class DatabaseManager extends DatabaseDemuxBase {
 
     const dir = path.parse(src).dir;
     const dest = path.join(dir, '__premigratory_temp.db');
-    await fs.copyFile(src, dest);
+
+    try {
+      await fs.copyFile(src, dest);
+    } catch (err) {
+      return null;
+    }
+
     return dest;
   }
 }

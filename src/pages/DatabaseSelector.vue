@@ -72,6 +72,7 @@
           v-for="(file, i) in files"
           :key="file.dbPath"
           @click="selectFile(file)"
+          :title="t`${file.companyName} stored at ${file.dbPath}`"
         >
           <div
             class="
@@ -91,23 +92,28 @@
             {{ i + 1 }}
           </div>
           <div class="w-full">
-            <p class="font-medium">
-              {{ file.companyName }}
-            </p>
-            <div
-              class="text-sm text-gray-600 flex justify-between overflow-x-auto"
-            >
-              <p class="whitespace-nowrap mr-2">
+            <div class="flex justify-between overflow-x-auto items-baseline">
+              <h2 class="font-medium">
+                {{ file.companyName }}
+              </h2>
+              <p class="whitespace-nowrap text-sm text-gray-600">
                 {{ formatDate(file.modified) }}
               </p>
-              <p class="text-right" v-if="fyo.store.isDevelopment">
-                {{ file.dbPath }}
-              </p>
             </div>
+            <p
+              class="
+                text-sm text-gray-600
+                overflow-x-auto
+                no-scrollbar
+                whitespace-nowrap
+              "
+            >
+              {{ truncate(file.dbPath) }}
+            </p>
           </div>
           <button
             class="
-              ml-auto
+              ms-auto
               p-2
               hover:bg-red-200
               rounded-full
@@ -137,17 +143,13 @@
         "
         style="top: 100%; transform: translateY(-100%)"
       >
-        <LanguageSelector
-          v-show="!creatingDemo"
-          class="text-sm w-28 bg-gray-100 rounded-md"
-          input-class="py-1.5 bg-transparent"
-        />
+        <LanguageSelector v-show="!creatingDemo" class="text-sm w-28" />
         <button
           class="
             text-sm
             bg-gray-100
             hover:bg-gray-200
-            rounded-md
+            rounded
             px-4
             py-1.5
             w-28
@@ -171,7 +173,7 @@
 
     <!-- Base Count Selection when Dev -->
     <Modal :open-modal="openModal" @closemodal="openModal = false">
-      <div class="p-4 text-gray-900">
+      <div class="p-4 text-gray-900 w-form">
         <h2 class="text-xl font-semibold select-none">Set Base Count</h2>
         <p class="text-base mt-2">
           Base Count is a lower bound on the number of entries made when
@@ -210,7 +212,7 @@
     </Modal>
   </div>
 </template>
-<script>
+<script lang="ts">
 import { setupDummyInstance } from 'dummy';
 import { ipcRenderer } from 'electron';
 import { t } from 'fyo';
@@ -221,12 +223,14 @@ import FeatherIcon from 'src/components/FeatherIcon.vue';
 import Loading from 'src/components/Loading.vue';
 import Modal from 'src/components/Modal.vue';
 import { fyo } from 'src/initFyo';
+import { showDialog } from 'src/utils/interactive';
 import { deleteDb, getSavePath } from 'src/utils/ipcCalls';
 import { updateConfigFiles } from 'src/utils/misc';
-import { showMessageDialog } from 'src/utils/ui';
 import { IPC_ACTIONS } from 'utils/messages';
+import type { ConfigFilesWithModified } from 'utils/types';
+import { defineComponent } from 'vue';
 
-export default {
+export default defineComponent({
   name: 'DatabaseSelector',
   emits: ['file-selected'],
   data() {
@@ -238,26 +242,43 @@ export default {
       creatingDemo: false,
       loadingDatabase: false,
       files: [],
+    } as {
+      openModal: boolean;
+      baseCount: number;
+      creationMessage: string;
+      creationPercent: number;
+      creatingDemo: boolean;
+      loadingDatabase: boolean;
+      files: ConfigFilesWithModified[];
     };
   },
   async mounted() {
     await this.setFiles();
 
     if (fyo.store.isDevelopment) {
+      // @ts-ignore
       window.ds = this;
     }
   },
   methods: {
-    formatDate(isoDate) {
+    truncate(value: string) {
+      if (value.length < 72) {
+        return value;
+      }
+
+      return '...' + value.slice(value.length - 72);
+    },
+    formatDate(isoDate: string) {
       return DateTime.fromISO(isoDate).toRelative();
     },
-    async deleteDb(i) {
+    async deleteDb(i: number) {
       const file = this.files[i];
       const vm = this;
 
-      await showMessageDialog({
-        message: t`Delete ${file.companyName}?`,
+      await showDialog({
+        title: t`Delete ${file.companyName}?`,
         detail: t`Database file: ${file.dbPath}`,
+        type: 'warning',
         buttons: [
           {
             label: this.t`Yes`,
@@ -265,10 +286,12 @@ export default {
               await deleteDb(file.dbPath);
               await vm.setFiles();
             },
+            isPrimary: true,
           },
           {
             label: this.t`No`,
             action() {},
+            isEscape: true,
           },
         ],
       });
@@ -299,13 +322,19 @@ export default {
       );
 
       updateConfigFiles(fyo);
-      fyo.purgeCache();
+      await fyo.purgeCache();
       await this.setFiles();
 
       this.creatingDemo = false;
     },
     async setFiles() {
-      this.files = await ipcRenderer.invoke(IPC_ACTIONS.GET_DB_LIST);
+      const dbList: ConfigFilesWithModified[] = await ipcRenderer.invoke(
+        IPC_ACTIONS.GET_DB_LIST
+      );
+
+      this.files = dbList?.sort(
+        (a, b) => Date.parse(b.modified) - Date.parse(a.modified)
+      );
     },
     async newDatabase() {
       if (this.creatingDemo) {
@@ -317,7 +346,7 @@ export default {
         return;
       }
 
-      this.connectToDatabase(filePath, true);
+      this.emitFileSelected(filePath, true);
     },
     async existingDatabase() {
       if (this.creatingDemo) {
@@ -331,16 +360,16 @@ export default {
           filters: [{ name: 'SQLite DB File', extensions: ['db'] }],
         })
       )?.filePaths?.[0];
-      this.connectToDatabase(filePath);
+      this.emitFileSelected(filePath);
     },
-    async selectFile(file) {
+    async selectFile(file: ConfigFilesWithModified) {
       if (this.creatingDemo) {
         return;
       }
 
-      await this.connectToDatabase(file.dbPath);
+      await this.emitFileSelected(file.dbPath);
     },
-    async connectToDatabase(filePath, isNew) {
+    async emitFileSelected(filePath: string, isNew?: boolean) {
       if (!filePath) {
         return;
       }
@@ -360,5 +389,5 @@ export default {
     Modal,
     Button,
   },
-};
+});
 </script>

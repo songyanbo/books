@@ -43,6 +43,8 @@ export abstract class DatabaseBase {
 
   // Delete
   abstract delete(schemaName: string, name: string): Promise<void>;
+  
+  abstract deleteAll(schemaName:string, filters:QueryFilter): Promise<number>;
 
   // Other
   abstract close(): Promise<void>;
@@ -57,14 +59,14 @@ export interface GetAllOptions {
   filters?: QueryFilter;
   offset?: number;
   limit?: number;
-  groupBy?: string;
-  orderBy?: string;
+  groupBy?: string | string[];
+  orderBy?: string | string[];
   order?: 'asc' | 'desc';
 }
 
 export type QueryFilter = Record<
   string,
-  boolean | string | (string | number | (string | number)[])[]
+  boolean | string | null | (string | number | (string | number | null)[])[]
 >;
 
 /**

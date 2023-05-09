@@ -7,14 +7,25 @@
         :handleBlur="handleBlur"
       ></slot>
     </div>
-    <div
-      ref="popover"
-      :class="popoverClass"
-      class="bg-white rounded border shadow-md popover-container relative z-10"
-      v-show="isOpen"
-    >
-      <slot name="content" :togglePopover="togglePopover"></slot>
-    </div>
+    <Transition>
+      <div
+        ref="popover"
+        :class="popoverClass"
+        class="
+          bg-white
+          rounded-md
+          border
+          shadow-lg
+          popover-container
+          relative
+          z-10
+        "
+        :style="{ 'transition-delay': `${isOpen ? entryDelay : exitDelay}ms` }"
+        v-show="isOpen"
+      >
+        <slot name="content" :togglePopover="togglePopover"></slot>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -27,9 +38,12 @@ export default {
   emits: ['open', 'close'],
   props: {
     showPopup: {
+      type: [Boolean, null],
       default: null,
     },
     right: Boolean,
+    entryDelay: { type: Number, default: 0 },
+    exitDelay: { type: Number, default: 0 },
     placement: {
       type: String,
       default: 'bottom-start',
@@ -79,6 +93,7 @@ export default {
       if (!this.popper) {
         this.popper = createPopper(this.$refs.reference, this.$refs.popover, {
           placement: this.placement,
+          modifiers: [{ name: 'offset', options: { offset: [0, 8] } }],
         });
       } else {
         this.popper.update();
@@ -118,3 +133,14 @@ export default {
   },
 };
 </script>
+<style scoped>
+.v-enter-active,
+.v-leave-active {
+  transition: opacity 150ms ease-out;
+}
+
+.v-enter-from,
+.v-leave-to {
+  opacity: 0;
+}
+</style>

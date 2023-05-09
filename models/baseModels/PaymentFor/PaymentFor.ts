@@ -1,5 +1,8 @@
+import { t } from 'fyo';
+import { DocValue } from 'fyo/core/types';
 import { Doc } from 'fyo/model/doc';
-import { FiltersMap, FormulaMap } from 'fyo/model/types';
+import { FiltersMap, FormulaMap, ValidationMap } from 'fyo/model/types';
+import { NotFoundError } from 'fyo/utils/errors';
 import { ModelNameEnum } from 'models/types';
 import { Money } from 'pesa';
 import { PartyRoleEnum } from '../Party/types';
@@ -18,23 +21,36 @@ export class PaymentFor extends Doc {
           return;
         }
 
-        const party = this.parentdoc!.party;
-        if (party === undefined) {
+        const party = await this.parentdoc?.loadAndGetLink('party');
+        if (!party) {
           return ModelNameEnum.SalesInvoice;
         }
 
-        const role = await this.fyo.getValue(
-          ModelNameEnum.Party,
-          party,
-          'role'
-        );
-
-        if (role === PartyRoleEnum.Supplier) {
+        if (party.role === PartyRoleEnum.Supplier) {
           return ModelNameEnum.PurchaseInvoice;
         }
 
         return ModelNameEnum.SalesInvoice;
       },
+    },
+    referenceName: {
+      formula: async () => {
+        if (!this.referenceName || !this.referenceType) {
+          return this.referenceName;
+        }
+
+        const exists = await this.fyo.db.exists(
+          this.referenceType,
+          this.referenceName
+        );
+
+        if (!exists) {
+          return null;
+        }
+
+        return this.referenceName;
+      },
+      dependsOn: ['referenceType'],
     },
     amount: {
       formula: async () => {
@@ -60,18 +76,41 @@ export class PaymentFor extends Doc {
 
   static filters: FiltersMap = {
     referenceName: (doc) => {
+      const zero =
+        '0.' +
+        '0'.repeat(doc.fyo.singles.SystemSettings?.internalPrecision ?? 11);
+
       const baseFilters = {
-        outstandingAmount: ['>', 0],
+        outstandingAmount: ['!=', zero],
         submitted: true,
         cancelled: false,
       };
 
       const party = doc?.parentdoc?.party as undefined | string;
-      if (party === undefined) {
+      if (!party) {
         return baseFilters;
       }
 
       return { ...baseFilters, party };
+    },
+  };
+
+  validations: ValidationMap = {
+    referenceName: async (value: DocValue) => {
+      const exists = await this.fyo.db.exists(
+        this.referenceType!,
+        value as string
+      );
+      if (exists) {
+        return;
+      }
+
+      throw new NotFoundError(
+        t`${this.fyo.schemaMap[this.referenceType!]?.label!} ${
+          value as string
+        } does not exist`,
+        false
+      );
     },
   };
 }

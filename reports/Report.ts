@@ -1,4 +1,6 @@
 import { Fyo } from 'fyo';
+import { Converter } from 'fyo/core/converter';
+import { DocValue } from 'fyo/core/types';
 import { Action } from 'fyo/model/types';
 import Observable from 'fyo/utils/observable';
 import { Field, RawValue } from 'schemas/types';
@@ -8,6 +10,7 @@ import { ColumnField, ReportData } from './types';
 export abstract class Report extends Observable<RawValue> {
   static title: string;
   static reportName: string;
+  static isInventory: boolean = false;
 
   fyo: Fyo;
   columns: ColumnField[] = [];
@@ -58,12 +61,13 @@ export abstract class Report extends Observable<RawValue> {
     return filterMap;
   }
 
-  async set(key: string, value: RawValue, callPostSet: boolean = true) {
+  async set(key: string, value: DocValue, callPostSet: boolean = true) {
     const field = this.filters.find((f) => f.fieldname === key);
     if (field === undefined) {
       return;
     }
 
+    value = Converter.toRawValue(value, field, this.fyo);
     const prevValue = this[key];
     if (prevValue === value) {
       return;

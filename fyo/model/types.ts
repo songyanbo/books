@@ -1,8 +1,9 @@
+import { Fyo } from 'fyo';
 import { DocValue, DocValueMap } from 'fyo/core/types';
 import SystemSettings from 'fyo/models/SystemSettings';
 import { FieldType, Schema, SelectOption } from 'schemas/types';
 import { QueryFilter } from 'utils/db/types';
-import { Router } from 'vue-router';
+import { RouteLocationRaw, Router } from 'vue-router';
 import { Doc } from './doc';
 
 /**
@@ -20,7 +21,7 @@ import { Doc } from './doc';
 export type FormulaReturn = DocValue | DocValueMap[] | undefined | Doc[];
 export type Formula = (fieldname?: string) => Promise<FormulaReturn> | FormulaReturn;
 export type FormulaConfig = { dependsOn?: string[]; formula: Formula };
-export type Default = () => DocValue;
+export type Default = (doc: Doc) => DocValue;
 export type Validation = (value: DocValue) => Promise<void> | void;
 export type Required = () => boolean;
 export type Hidden = () => boolean;
@@ -62,10 +63,12 @@ export type ListsMap = Record<string, ListFunction | undefined>;
 
 export interface Action {
   label: string;
-  action: (doc: Doc, router: Router) => Promise<void> | void;
+  action: (doc: Doc, router: Router) => Promise<void> | void | unknown;
   condition?: (doc: Doc) => boolean;
+  group?: string;
+  type?: 'primary' | 'secondary';
   component?: {
-    template?: string;
+    template: string;
   };
 }
 
@@ -74,18 +77,17 @@ export interface RenderData {
   [key: string]: DocValue | Schema
 }
 
-export interface ColumnConfig {
+export type ColumnConfig = {
   label: string;
   fieldtype: FieldType;
-  fieldname?: string;
-  size?: string;
+  fieldname: string;
   render?: (doc: RenderData) => { template: string };
-  getValue?: (doc: Doc) => string;
+  display?: (value: unknown, fyo: Fyo) => string;
 }
 
 export type ListViewColumn = string | ColumnConfig;
 export interface ListViewSettings {
-  formRoute?: (name: string) => string;
+  formRoute?: (name: string) => RouteLocationRaw;
   columns?: ListViewColumn[];
 }
 

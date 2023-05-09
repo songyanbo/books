@@ -3,11 +3,10 @@ import { Doc } from 'fyo/model/doc';
 import { isPesa } from 'fyo/utils';
 import { ValueError } from 'fyo/utils/errors';
 import { DateTime } from 'luxon';
-import { Money } from 'pesa';
 import { Field, FieldTypeEnum, RawValue, TargetField } from 'schemas/types';
-import { getIsNullOrUndef } from 'utils';
+import { getIsNullOrUndef, safeParseFloat, safeParseInt } from 'utils';
 import { DatabaseHandler } from './dbHandler';
-import { DocValue, DocValueMap, RawValueMap } from './types';
+import { Attachment, DocValue, DocValueMap, RawValueMap } from './types';
 
 /**
  * # Converter
@@ -37,6 +36,7 @@ export class Converter {
     schemaName: string,
     rawValueMap: RawValueMap | RawValueMap[]
   ): DocValueMap | DocValueMap[] {
+    rawValueMap ??= {};
     if (Array.isArray(rawValueMap)) {
       return rawValueMap.map((dv) => this.#toDocValueMap(schemaName, dv));
     } else {
@@ -48,6 +48,7 @@ export class Converter {
     schemaName: string,
     docValueMap: DocValueMap | DocValueMap[]
   ): RawValueMap | RawValueMap[] {
+    docValueMap ??= {};
     if (Array.isArray(docValueMap)) {
       return docValueMap.map((dv) => this.#toRawValueMap(schemaName, dv));
     } else {
@@ -69,6 +70,8 @@ export class Converter {
         return toDocFloat(value, field);
       case FieldTypeEnum.Check:
         return toDocCheck(value, field);
+      case FieldTypeEnum.Attachment:
+        return toDocAttachment(value, field);
       default:
         return toDocString(value, field);
     }
@@ -90,13 +93,15 @@ export class Converter {
         return toRawCheck(value, field);
       case FieldTypeEnum.Link:
         return toRawLink(value, field);
+      case FieldTypeEnum.Attachment:
+        return toRawAttachment(value, field);
       default:
         return toRawString(value, field);
     }
   }
 
   #toDocValueMap(schemaName: string, rawValueMap: RawValueMap): DocValueMap {
-    const fieldValueMap = this.db.fieldValueMap[schemaName];
+    const fieldValueMap = this.db.fieldMap[schemaName];
     const docValueMap: DocValueMap = {};
 
     for (const fieldname in rawValueMap) {
@@ -124,7 +129,7 @@ export class Converter {
   }
 
   #toRawValueMap(schemaName: string, docValueMap: DocValueMap): RawValueMap {
-    const fieldValueMap = this.db.fieldValueMap[schemaName];
+    const fieldValueMap = this.db.fieldMap[schemaName];
     const rawValueMap: RawValueMap = {};
 
     for (const fieldname in docValueMap) {
@@ -225,7 +230,7 @@ function toDocInt(value: RawValue, field: Field): number {
   }
 
   if (typeof value === 'string') {
-    value = parseInt(value);
+    value = safeParseInt(value);
   }
 
   return toDocFloat(value, field);
@@ -241,7 +246,7 @@ function toDocFloat(value: RawValue, field: Field): number {
   }
 
   if (typeof value === 'string') {
-    value = parseFloat(value);
+    value = safeParseFloat(value);
   }
 
   if (value === null) {
@@ -261,7 +266,7 @@ function toDocCheck(value: RawValue, field: Field): boolean {
   }
 
   if (typeof value === 'string') {
-    return !!parseFloat(value);
+    return !!safeParseFloat(value);
   }
 
   if (typeof value === 'number') {
@@ -271,9 +276,25 @@ function toDocCheck(value: RawValue, field: Field): boolean {
   throwError(value, field, 'doc');
 }
 
+function toDocAttachment(value: RawValue, field: Field): null | Attachment {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throwError(value, field, 'doc');
+  }
+
+  try {
+    return JSON.parse(value) || null;
+  } catch {
+    throwError(value, field, 'doc');
+  }
+}
+
 function toRawCurrency(value: DocValue, fyo: Fyo, field: Field): string {
   if (isPesa(value)) {
-    return (value as Money).store;
+    return value.store;
   }
 
   if (getIsNullOrUndef(value)) {
@@ -293,7 +314,7 @@ function toRawCurrency(value: DocValue, fyo: Fyo, field: Field): string {
 
 function toRawInt(value: DocValue, field: Field): number {
   if (typeof value === 'string') {
-    return parseInt(value);
+    return safeParseInt(value);
   }
 
   if (getIsNullOrUndef(value)) {
@@ -309,7 +330,7 @@ function toRawInt(value: DocValue, field: Field): number {
 
 function toRawFloat(value: DocValue, field: Field): number {
   if (typeof value === 'string') {
-    return parseFloat(value);
+    return safeParseFloat(value);
   }
 
   if (getIsNullOrUndef(value)) {
@@ -387,6 +408,22 @@ function toRawLink(value: DocValue, field: Field): string | null {
 
   if (typeof value === 'string') {
     return value;
+  }
+
+  throwError(value, field, 'raw');
+}
+
+function toRawAttachment(value: DocValue, field: Field): null | string {
+  if (!value) {
+    return null;
+  }
+
+  if (
+    (value as Attachment)?.name &&
+    (value as Attachment)?.data &&
+    (value as Attachment)?.type
+  ) {
+    return JSON.stringify(value);
   }
 
   throwError(value, field, 'raw');

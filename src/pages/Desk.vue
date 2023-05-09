@@ -1,9 +1,17 @@
+<script setup lang="ts">
+import { showSidebar } from 'src/utils/refs';
+import { toggleSidebar } from 'src/utils/ui';
+</script>
 <template>
   <div class="flex overflow-hidden">
-    <Sidebar
-      class="w-sidebar flex-shrink-0 border-r"
-      @change-db-file="$emit('change-db-file')"
-    />
+    <Transition name="sidebar">
+      <Sidebar
+        v-show="showSidebar"
+        class="flex-shrink-0 border-e whitespace-nowrap w-sidebar"
+        @change-db-file="$emit('change-db-file')"
+      />
+    </Transition>
+
     <div class="flex flex-1 overflow-y-hidden bg-white">
       <router-view v-slot="{ Component }">
         <keep-alive>
@@ -11,36 +19,74 @@
         </keep-alive>
       </router-view>
 
-      <div class="flex" v-if="showQuickEdit">
-        <router-view name="edit" v-slot="{ Component }">
-          <keep-alive>
+      <router-view name="edit" v-slot="{ Component, route }">
+        <Transition name="quickedit">
+          <div v-if="route?.query?.edit">
             <component
               :is="Component"
-              class="w-quick-edit flex-1"
-              :key="$route.query.schemaName + $route.query.name"
+              :key="route.query.schemaName + route.query.name"
             />
-          </keep-alive>
-        </router-view>
-      </div>
+          </div>
+        </Transition>
+      </router-view>
     </div>
+
+    <!-- Show Sidebar Button -->
+    <button
+      v-show="!showSidebar"
+      class="
+        absolute
+        bottom-0
+        start-0
+        text-gray-600
+        bg-gray-100
+        rounded
+        rtl-rotate-180
+        p-1
+        m-4
+        opacity-0
+        hover:opacity-100 hover:shadow-md
+      "
+      @click="() => toggleSidebar()"
+    >
+      <feather-icon name="chevrons-right" class="w-4 h-4" />
+    </button>
   </div>
 </template>
-<script>
-import Sidebar from '../components/Sidebar';
-export default {
+<script lang="ts">
+import { defineComponent } from 'vue';
+import Sidebar from '../components/Sidebar.vue';
+export default defineComponent({
   name: 'Desk',
   emits: ['change-db-file'],
   components: {
     Sidebar,
   },
-  computed: {
-    showQuickEdit() {
-      return (
-        this.$route.query.edit &&
-        this.$route.query.schemaName &&
-        this.$route.query.name
-      );
-    },
-  },
-};
+});
 </script>
+
+<style scoped>
+.sidebar-enter-from,
+.sidebar-leave-to {
+  opacity: 0;
+  transform: translateX(calc(-1 * var(--w-sidebar)));
+  width: 0px;
+}
+[dir='rtl'] .sidebar-leave-to {
+  opacity: 0;
+  transform: translateX(calc(1 * var(--w-sidebar)));
+  width: 0px;
+}
+
+.sidebar-enter-to,
+.sidebar-leave-from {
+  opacity: 1;
+  transform: translateX(0px);
+  width: var(--w-sidebar);
+}
+
+.sidebar-enter-active,
+.sidebar-leave-active {
+  transition: all 150ms ease-out;
+}
+</style>

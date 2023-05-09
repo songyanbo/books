@@ -1,6 +1,6 @@
 <div align="center" markdown="1">
 
-<img src=".github/logo.png" alt="Frappe Books logo" width="384"/>
+<img src="https://user-images.githubusercontent.com/29507195/207267672-d422db6c-d89a-4bbe-9822-468a55c15053.png" alt="Frappe Books logo" width="384"/>
 
 ---
 
@@ -12,7 +12,7 @@ Free Desktop book-keeping software for small businesses and freelancers.
 
 [frappebooks.com](https://frappebooks.com/)
 
-<img src="./.github/frappe-books-preview.png" alt="Frappe Books Preview"/>
+<img src="https://user-images.githubusercontent.com/29507195/207267857-4ae48890-3fb2-4046-80cf-3256b46c72a0.png" alt="Frappe Books Preview"/>
 
 </div>
 
@@ -68,7 +68,7 @@ Next, you will need to install [yarn](https://classic.yarnpkg.com/lang/en/docs/i
 ### Clone and Run
 
 Once you are through the Pre-requisites, you can run the following commands to
-get Frappe Books running in development mode:
+setup Frappe Books for development and building:
 
 ```bash
 # clone the repository
@@ -79,14 +79,37 @@ cd books
 
 # install dependencies
 yarn
+```
 
+#### Development
+
+To run Frappe Books in development mode (with hot reload, etc):
+
+```bash
 # start the electron app
 yarn electron:serve
 ```
 
+#### Build
+
+To build Frappe Books and create an installer:
+
+```bash
+# start the electron app
+yarn electron:build
+```
+
+**Note**
+By default the above command will build for your computer's operating system and
+architecture. To build for other environments (example: for linux from a windows
+computer) check the _Building_ section at
+[electron.build/cli](https://www.electron.build/cli).
+
+So to build for linux you could use the `--linux` flag like so: `yarn electron:build --linux`.
+
 ## Contributions and Community
 
-There are many ways you can contribute even if you don't code:
+If you want to contribute to Frappe Books, please check our [Contribution Guidelines](https://github.com/frappe/books/blob/master/.github/CONTRIBUTING.md). There are many ways you can contribute even if you don't code:
 
 1. If you find any issues, no matter how small (even typos), you can [raise an issue](https://github.com/frappe/books/issues/new) to inform us.
 2. You can help us with language support by [contributing translations](https://github.com/frappe/books/wiki/Contributing-Translations).
@@ -98,23 +121,26 @@ If you want to contribute code then you can fork this repo, make changes and rai
 
 ## Links
 
-- [Telegram Group](https://t.me/frappebooks): Used for discussions regarding features, issues, changes, etc. This group is also be used to make decisions regarding project direction.
-- [Project Board](https://github.com/frappe/books/projects/1): Roadmap that is updated with acceptable latency.
+- [Telegram Group](https://t.me/frappebooks): Used for discussions and decisions regarding everything Frappe Books.
 - [GitHub Discussions](https://github.com/frappe/books/discussions): Used for discussions around a specific topic.
 - [Frappe Books Blog](https://tech.frappebooks.com/): Sporadically updated dev blog regarding the development of this project.
 
 ## Translation Contributors
 
-| Language   | Contributors                                                                   |
-| ---------- | ------------------------------------------------------------------------------ |
-| French     | [DeepL](https://www.deepl.com/)                                                |
-| German     | [DeepL](https://www.deepl.com/), [barredterra](https://github.com/barredterra) |
-| Portuguese | [DeepL](https://www.deepl.com/)                                                |
-| Arabic     | [taha2002](https://github.com/taha2002)                                        |
-| Catalan    | Dídac E. Jiménez                                                               |
-| Dutch      | [FastAct](https://github.com/FastAct)                                          |
-| Spanish    | [talmax1124](https://github.com/talmax1124)                                    |
-| Gujarati   | [dhruvilxcode](https://github.com/dhruvilxcode)                                |
+| Language           | Contributors                                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| French             | [DeepL](https://www.deepl.com/), [mael-chouteau](https://github.com/mael-chouteau), [joandreux](https://github.com/joandreux) |
+| German             | [DeepL](https://www.deepl.com/), [barredterra](https://github.com/barredterra)                                                |
+| Portuguese         | [DeepL](https://www.deepl.com/)                                                                                               |
+| Arabic             | [taha2002](https://github.com/taha2002), [Faridget](https://github.com/faridget)                                              |
+| Catalan            | Dídac E. Jiménez                                                                                                              |
+| Dutch              | [FastAct](https://github.com/FastAct)                                                                                         |
+| Spanish            | [talmax1124](https://github.com/talmax1124)                                                                                   |
+| Gujarati           | [dhruvilxcode](https://github.com/dhruvilxcode), [4silvertooth](https://github.com/4silvertooth)                              |
+| Korean             | [Isaac-Kwon](https://github.com/Isaac-Kwon)                                                                                   |
+| Simplified Chinese | [wcxu21](https://github.com/wcxu21)                                                                                           |
+| Swedish            | [papplo](https://github.com/papplo)                                                                                           |
+| Turkish            | Eyuq, [XTechnology-TR](https://github.com/XTechnology-TR)                                                                     |
 
 ## License
 

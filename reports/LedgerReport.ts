@@ -4,6 +4,7 @@ import { ModelNameEnum } from 'models/types';
 import { Report } from 'reports/Report';
 import { GroupedMap, LedgerEntry, RawLedgerEntry } from 'reports/types';
 import { QueryFilter } from 'utils/db/types';
+import { safeParseFloat, safeParseInt } from 'utils/index';
 import getCommonExportActions from './commonExporter';
 
 type GroupByKey = 'account' | 'party' | 'referenceName';
@@ -94,18 +95,18 @@ export abstract class LedgerReport extends Report {
       {
         fields,
         filters,
-        orderBy: 'date',
+        orderBy: ['date', 'created'],
         order: this.ascending ? 'asc' : 'desc',
       }
     )) as RawLedgerEntry[];
 
     this._rawData = entries.map((entry) => {
       return {
-        name: parseInt(entry.name),
+        name: safeParseInt(entry.name),
         account: entry.account,
         date: new Date(entry.date),
-        debit: parseFloat(entry.debit),
-        credit: parseFloat(entry.credit),
+        debit: safeParseFloat(entry.debit),
+        credit: safeParseFloat(entry.credit),
         balance: 0,
         referenceType: entry.referenceType,
         referenceName: entry.referenceName,

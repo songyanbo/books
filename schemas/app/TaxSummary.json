@@ -12,21 +12,16 @@
     },
     {
       "fieldname": "rate",
-      "label": "Rate",
+      "label": "Tax Rate",
       "fieldtype": "Float",
       "required": true
     },
     {
       "fieldname": "amount",
-      "label": "Amount",
+      "label": "Tax Amount",
       "fieldtype": "Currency",
       "required": true
-    },
-    {
-      "fieldname": "baseAmount",
-      "label": "Amount (Company Currency)",
-      "fieldtype": "Currency",
-      "readOnly": true
     }
-  ]
+  ],
+  "tableFields": ["account", "rate", "amount"]
 }

@@ -5,7 +5,9 @@ import {
   Action,
   FiltersMap,
   FormulaMap,
+  HiddenMap,
   ListViewSettings,
+  ReadOnlyMap,
   ValidationMap,
 } from 'fyo/model/types';
 import { ValidationError } from 'fyo/utils/errors';
@@ -13,6 +15,12 @@ import { Money } from 'pesa';
 import { AccountRootTypeEnum, AccountTypeEnum } from '../Account/types';
 
 export class Item extends Doc {
+  trackItem?: boolean;
+  itemType?: 'Product' | 'Service';
+  for?: 'Purchases' | 'Sales' | 'Both';
+  hasBatch?: boolean;
+  hasSerialNumber?: boolean;
+
   formulas: FormulaMap = {
     incomeAccount: {
       formula: async () => {
@@ -28,6 +36,11 @@ export class Item extends Doc {
     },
     expenseAccount: {
       formula: async () => {
+        if (this.trackItem) {
+          return this.fyo.singles.InventorySettings
+            ?.stockReceivedButNotBilled as string;
+        }
+
         const cogs = await this.fyo.db.getAllRaw('Account', {
           filters: {
             accountType: AccountTypeEnum['Cost of Goods Sold'],
@@ -40,7 +53,7 @@ export class Item extends Doc {
           return cogs[0].name as string;
         }
       },
-      dependsOn: ['itemType'],
+      dependsOn: ['itemType', 'trackItem'],
     },
   };
 
@@ -49,9 +62,11 @@ export class Item extends Doc {
       isGroup: false,
       rootType: AccountRootTypeEnum.Income,
     }),
-    expenseAccount: () => ({
+    expenseAccount: (doc) => ({
       isGroup: false,
-      rootType: AccountRootTypeEnum.Expense,
+      rootType: doc.trackItem
+        ? AccountRootTypeEnum.Liability
+        : AccountRootTypeEnum.Expense,
     }),
   };
 
@@ -66,7 +81,8 @@ export class Item extends Doc {
   static getActions(fyo: Fyo): Action[] {
     return [
       {
-        label: fyo.t`New Sale`,
+        group: fyo.t`Create`,
+        label: fyo.t`Sales Invoice`,
         condition: (doc) => !doc.notInserted && doc.for !== 'Purchases',
         action: async (doc, router) => {
           const invoice = await fyo.doc.getNewDoc('SalesInvoice');
@@ -79,7 +95,8 @@ export class Item extends Doc {
         },
       },
       {
-        label: fyo.t`New Purchase`,
+        group: fyo.t`Create`,
+        label: fyo.t`Purchase Invoice`,
         condition: (doc) => !doc.notInserted && doc.for !== 'Sales',
         action: async (doc, router) => {
           const invoice = await fyo.doc.getNewDoc('PurchaseInvoice');
@@ -99,4 +116,26 @@ export class Item extends Doc {
       columns: ['name', 'unit', 'tax', 'rate'],
     };
   }
+
+  hidden: HiddenMap = {
+    trackItem: () =>
+      !this.fyo.singles.AccountingSettings?.enableInventory ||
+      this.itemType !== 'Product' ||
+      (this.inserted && !this.trackItem),
+    barcode: () => !this.fyo.singles.InventorySettings?.enableBarcodes,
+    hasBatch: () =>
+      !(this.fyo.singles.InventorySettings?.enableBatches && this.trackItem),
+    hasSerialNumber: () =>
+      !(this.fyo.singles.InventorySettings?.enableSerialNumber && this.trackItem),
+    uomConversions: () =>
+      !this.fyo.singles.InventorySettings?.enableUomConversions,
+  };
+
+  readOnly: ReadOnlyMap = {
+    unit: () => this.inserted,
+    itemType: () => this.inserted,
+    trackItem: () => this.inserted,
+    hasBatch: () => this.inserted,
+    hasSerialNumber: () => this.inserted,
+  };
 }
