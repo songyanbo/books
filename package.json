@@ -1,6 +1,6 @@
 {
   "name": "frappe-books",
-  "version": "0.13.0",
+  "version": "0.14.1",
   "description": "Simple book-keeping app for everyone",
   "main": "background.js",
   "author": {
@@ -11,6 +11,7 @@
     "serve": "vue-cli-service serve",
     "build": "vue-cli-service build",
     "lint": "vue-cli-service lint",
+    "release": "scripts/publish-mac-arm.sh",
     "postinstall": "electron-rebuild",
     "postuninstall": "electron-rebuild",
     "electron:build": "vue-cli-service electron:build",
