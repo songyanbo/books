@@ -16,6 +16,8 @@ import { FieldTypeEnum, Schema } from 'schemas/types';
 import { safeParseFloat } from 'utils/index';
 import { Invoice } from '../Invoice/Invoice';
 import { Item } from '../Item/Item';
+import { StockTransfer } from 'models/inventory/StockTransfer';
+import { getPriceListRate } from 'models/helpers';
 
 export abstract class InvoiceItem extends Doc {
   item?: string;
@@ -23,6 +25,9 @@ export abstract class InvoiceItem extends Doc {
   amount?: Money;
   parentdoc?: Invoice;
   rate?: Money;
+
+  description?: string;
+  hsnCode?: number;
 
   unit?: string;
   transferUnit?: string;
@@ -42,6 +47,18 @@ export abstract class InvoiceItem extends Doc {
 
   get isSales() {
     return this.schemaName === 'SalesInvoiceItem';
+  }
+
+  get date() {
+    return this.parentdoc?.date ?? undefined;
+  }
+
+  get party() {
+    return this.parentdoc?.party ?? undefined;
+  }
+
+  get priceList() {
+    return this.parentdoc?.priceList ?? undefined;
   }
 
   get discountAfterTax() {
@@ -97,11 +114,14 @@ export abstract class InvoiceItem extends Doc {
     },
     rate: {
       formula: async (fieldname) => {
-        const rate = (await this.fyo.getValue(
+        const priceListRate = await getPriceListRate(this);
+        const itemRate = (await this.fyo.getValue(
           'Item',
           this.item as string,
           'rate'
         )) as undefined | Money;
+
+        const rate = priceListRate instanceof Money ? priceListRate : itemRate;
 
         if (!rate?.float && this.rate?.float) {
           return this.rate;
@@ -140,6 +160,9 @@ export abstract class InvoiceItem extends Doc {
         return rateFromTotals ?? rate ?? this.fyo.pesa(0);
       },
       dependsOn: [
+        'date',
+        'priceList',
+        'batch',
         'party',
         'exchangeRate',
         'item',
@@ -347,7 +370,26 @@ export abstract class InvoiceItem extends Doc {
           return 0;
         }
 
-        return this.quantity;
+        const { backReference, stockTransferSchemaName } = this.parentdoc ?? {};
+        if (
+          !backReference ||
+          !stockTransferSchemaName ||
+          typeof this.quantity !== 'number'
+        ) {
+          return this.quantity;
+        }
+
+        const refdoc = (await this.fyo.doc.getDoc(
+          stockTransferSchemaName,
+          backReference
+        )) as StockTransfer;
+
+        const transferred =
+          refdoc.items
+            ?.filter((i) => i.item === this.item)
+            .reduce((acc, i) => i.quantity ?? 0 + acc, 0) ?? 0;
+
+        return Math.max(0, this.quantity - transferred);
       },
       dependsOn: ['item', 'quantity'],
     },

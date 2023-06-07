@@ -349,7 +349,8 @@ export function getFormRoute(
     return route;
   }
 
-  return `/edit/${schemaName}/${name}`;
+  // Use `encodeURIComponent` if more name issues
+  return `/edit/${schemaName}/${name.replaceAll('/', '%2F')}`;
 }
 
 export async function getDocFromNameIfExistsElseNew(

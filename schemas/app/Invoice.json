@@ -44,6 +44,13 @@
       "section": "Default"
     },
     {
+      "fieldname": "priceList",
+      "label": "Price List",
+      "fieldtype": "Link",
+      "target": "PriceList",
+      "section": "Default"
+    },
+    {
       "abstract": true,
       "fieldname": "items",
       "section": "Items"
@@ -148,6 +155,11 @@
       "tab": "Settings"
     },
     {
+      "abstract": true,
+      "fieldname": "makeAutoStockTransfer",
+      "tab": "Settings"
+    },
+    {
       "fieldname": "outstandingAmount",
       "label": "Outstanding Amount",
       "fieldtype": "Currency",
@@ -173,6 +185,11 @@
       "placeholder": "Add attachment",
       "label": "Attachment",
       "fieldtype": "Attachment",
+      "section": "References"
+    },
+    {
+      "abstract": true,
+      "fieldname": "backReference",
       "section": "References"
     }
   ],
