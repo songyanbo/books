@@ -31,6 +31,13 @@ export function useKeys() {
   });
 
   const keydownListener = (e: KeyboardEvent) => {
+    if (
+      e.target instanceof HTMLInputElement &&
+      !(e.altKey || e.metaKey || e.ctrlKey)
+    ) {
+      return;
+    }
+
     keys.alt = e.altKey;
     keys.ctrl = e.ctrlKey;
     keys.meta = e.metaKey;
@@ -100,7 +107,7 @@ export function useDocShortcuts(
   shortcuts: Shortcuts,
   docRef: DocRef,
   name: string,
-  isMultiple: boolean = true
+  isMultiple = true
 ) {
   let context = name;
   if (isMultiple) {

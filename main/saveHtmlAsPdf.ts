@@ -18,7 +18,7 @@ export async function saveHtmlAsPdf(
   const htmlPath = path.join(tempRoot, `${filename}.html`);
   await fs.writeFile(htmlPath, html, { encoding: 'utf-8' });
 
-  const printWindow = getInitializedPrintWindow(htmlPath, width, height);
+  const printWindow = await getInitializedPrintWindow(htmlPath, width, height);
   const printOptions = {
     marginsType: 1, // no margin
     pageSize: {
@@ -30,25 +30,14 @@ export async function saveHtmlAsPdf(
     printSelectionOnly: false,
   };
 
-  /**
-   * After the printWindow content is ready, save as pdf and
-   * then close the window and delete the temp html file.
-   */
-  return await new Promise((resolve) => {
-    printWindow.webContents.once('did-finish-load', () => {
-      printWindow.webContents.printToPDF(printOptions).then((data) => {
-        fs.writeFile(savePath, data).then(() => {
-          printWindow.close();
-          fs.unlink(htmlPath).then(() => {
-            resolve(true);
-          });
-        });
-      });
-    });
-  });
+  const data = await printWindow.webContents.printToPDF(printOptions);
+  await fs.writeFile(savePath, data);
+  printWindow.close();
+  await fs.unlink(htmlPath);
+  return true;
 }
 
-function getInitializedPrintWindow(
+async function getInitializedPrintWindow(
   printFilePath: string,
   width: number,
   height: number
@@ -59,6 +48,6 @@ function getInitializedPrintWindow(
     show: false,
   });
 
-  printWindow.loadFile(printFilePath);
+  await printWindow.loadFile(printFilePath);
   return printWindow;
 }

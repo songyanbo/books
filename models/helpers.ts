@@ -9,16 +9,11 @@ import {
   AccountRootType,
   AccountRootTypeEnum,
 } from './baseModels/Account/types';
-import {
-  Defaults,
-  numberSeriesDefaultsMap,
-} from './baseModels/Defaults/Defaults';
+import { numberSeriesDefaultsMap } from './baseModels/Defaults/Defaults';
 import { Invoice } from './baseModels/Invoice/Invoice';
 import { StockMovement } from './inventory/StockMovement';
 import { StockTransfer } from './inventory/StockTransfer';
 import { InvoiceStatus, ModelNameEnum } from './types';
-import { InvoiceItem } from './baseModels/InvoiceItem/InvoiceItem';
-import { ItemPrice } from './baseModels/ItemPrice/ItemPrice';
 
 export function getInvoiceActions(
   fyo: Fyo,
@@ -57,7 +52,7 @@ export function getMakeStockTransferAction(
     condition: (doc: Doc) => doc.isSubmitted && !!doc.stockNotTransferred,
     action: async (doc: Doc) => {
       const transfer = await (doc as Invoice).getStockTransfer();
-      if (!transfer) {
+      if (!transfer || !transfer.name) {
         return;
       }
 
@@ -83,7 +78,7 @@ export function getMakeInvoiceAction(
     condition: (doc: Doc) => doc.isSubmitted && !doc.backReference,
     action: async (doc: Doc) => {
       const invoice = await (doc as StockTransfer).getInvoice();
-      if (!invoice) {
+      if (!invoice || !invoice.name) {
         return;
       }
 
@@ -130,10 +125,7 @@ export function getMakePaymentAction(fyo: Fyo): Action {
   };
 }
 
-export function getLedgerLinkAction(
-  fyo: Fyo,
-  isStock: boolean = false
-): Action {
+export function getLedgerLinkAction(fyo: Fyo, isStock = false): Action {
   let label = fyo.t`Accounting Entries`;
   let reportClassName: 'GeneralLedger' | 'StockLedger' = 'GeneralLedger';
 
@@ -148,7 +140,7 @@ export function getLedgerLinkAction(
     condition: (doc: Doc) => doc.isSubmitted,
     action: async (doc: Doc, router: Router) => {
       const route = getLedgerLink(doc, reportClassName);
-      router.push(route);
+      await router.push(route);
     },
   };
 }
@@ -176,7 +168,7 @@ export function getTransactionStatusColumn(): ColumnConfig {
     fieldtype: 'Select',
     render(doc) {
       const status = getDocStatus(doc) as InvoiceStatus;
-      const color = statusColor[status];
+      const color = statusColor[status] ?? 'gray';
       const label = getStatusText(status);
 
       return {
@@ -332,19 +324,15 @@ export function getPriceListStatusColumn(): ColumnConfig {
     label: t`Enabled For`,
     fieldname: 'enabledFor',
     fieldtype: 'Select',
-    render(doc) {
-      let status = 'None';
+    render({ isSales, isPurchase }) {
+      let status = t`None`;
 
-      if (doc.buying && !doc.selling) {
-        status = 'Buying';
-      }
-
-      if (doc.selling && !doc.buying) {
-        status = 'Selling';
-      }
-
-      if (doc.buying && doc.selling) {
-        status = 'Buying & Selling';
+      if (isSales && isPurchase) {
+        status = t`Sales and Purchase`;
+      } else if (isSales) {
+        status = t`Sales`;
+      } else if (isPurchase) {
+        status = t`Purchase`;
       }
 
       return {
@@ -354,93 +342,24 @@ export function getPriceListStatusColumn(): ColumnConfig {
   };
 }
 
-export async function getItemPrice(
-  doc: InvoiceItem | ItemPrice,
-  validFrom?: Date,
-  validUpto?: Date
-): Promise<string | undefined> {
-  if (!doc.item || !doc.priceList) {
-    return;
-  }
+export function getPriceListEnabledColumn(): ColumnConfig {
+  return {
+    label: t`Enabled`,
+    fieldname: 'enabled',
+    fieldtype: 'Data',
+    render(doc) {
+      let status = t`Disabled`;
+      let color = 'orange';
+      if (doc.isEnabled) {
+        status = t`Enabled`;
+        color = 'green';
+      }
 
-  const isUomDependent = await doc.fyo.getValue(
-    ModelNameEnum.PriceList,
-    doc.priceList,
-    'isUomDependent'
-  );
-
-  const itemPriceQuery = Object.values(
-    await doc.fyo.db.getAll(ModelNameEnum.ItemPrice, {
-      filters: {
-        enabled: true,
-        item: doc.item,
-        ...(doc.isSales ? { selling: true } : { buying: true }),
-        ...(doc.batch ? { batch: doc.batch as string } : { batch: null }),
-      },
-      fields: ['name', 'unit', 'party', 'batch', 'validFrom', 'validUpto'],
-    })
-  )[0];
-
-  if (!itemPriceQuery) {
-    return;
-  }
-
-  const { name, unit, party } = itemPriceQuery;
-  const validFromDate = validFrom ?? itemPriceQuery.validFrom;
-  const validUptoDate = validFrom ?? itemPriceQuery.validUpto;
-  let date;
-
-  if (doc.date) {
-    date = new Date((doc.date as Date).setHours(0, 0, 0));
-  }
-
-  if (isUomDependent && unit !== doc.unit) {
-    return;
-  }
-
-  if (party && doc.party !== party) {
-    return;
-  }
-
-  if (date instanceof Date) {
-    if (validFromDate && date < validFromDate) {
-      return;
-    }
-
-    if (validUptoDate && date > validUptoDate) {
-      return;
-    }
-  }
-
-  if (validFrom && validUpto) {
-    if (validFromDate && validFrom < validFromDate) {
-      return;
-    }
-
-    if (validUptoDate && validFrom > validUptoDate) {
-      return;
-    }
-  }
-
-  return name as string;
-}
-
-export async function getPriceListRate(
-  doc: InvoiceItem
-): Promise<Money | undefined> {
-  const itemPrice = await getItemPrice(doc);
-
-  if (!itemPrice) {
-    return;
-  }
-
-  const itemPriceRate = (await doc.fyo.getValue(
-    ModelNameEnum.ItemPrice,
-    itemPrice,
-    'rate'
-  )) as Money;
-
-  return itemPriceRate;
+      return {
+        template: `<Badge class="text-xs" color="${color}">${status}</Badge>`,
+      };
+    },
+  };
 }
 
 export async function getExchangeRate({
@@ -464,9 +383,7 @@ export async function getExchangeRate({
 
   let exchangeRate = 0;
   if (localStorage) {
-    exchangeRate = safeParseFloat(
-      localStorage.getItem(cacheKey as string) as string
-    );
+    exchangeRate = safeParseFloat(localStorage.getItem(cacheKey) as string);
   }
 
   if (exchangeRate && exchangeRate !== 1) {
@@ -477,9 +394,14 @@ export async function getExchangeRate({
     const res = await fetch(
       `https://api.vatcomply.com/rates?date=${date}&base=${fromCurrency}&symbols=${toCurrency}`
     );
-    const data = await res.json();
+    const data = (await res.json()) as {
+      base: string;
+      data: string;
+      rates: Record<string, number>;
+    };
     exchangeRate = data.rates[toCurrency];
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error(error);
     exchangeRate ??= 1;
   }
@@ -514,7 +436,7 @@ export function getNumberSeries(schemaName: string, fyo: Fyo) {
     return undefined;
   }
 
-  const defaults = fyo.singles.Defaults as Defaults | undefined;
+  const defaults = fyo.singles.Defaults;
   const field = fyo.getField(schemaName, 'numberSeries');
   const value = defaults?.[numberSeriesKey] as string | undefined;
   return value ?? (field?.default as string | undefined);
