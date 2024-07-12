@@ -25,6 +25,21 @@ import { Party } from '../Party/Party';
 import { Payment } from '../Payment/Payment';
 import { Tax } from '../Tax/Tax';
 import { TaxSummary } from '../TaxSummary/TaxSummary';
+import { ReturnDocItem } from 'models/inventory/types';
+import { AccountFieldEnum, PaymentTypeEnum } from '../Payment/types';
+
+export type TaxDetail = {
+  account: string;
+  payment_account?: string;
+  rate: number;
+};
+
+export type InvoiceTaxItem = {
+  details: TaxDetail;
+  exchangeRate?: number;
+  fullAmount: Money;
+  taxAmount: Money;
+};
 
 export abstract class Invoice extends Transactional {
   _taxes: Record<string, Tax> = {};
@@ -52,8 +67,17 @@ export abstract class Invoice extends Transactional {
   makeAutoPayment?: boolean;
   makeAutoStockTransfer?: boolean;
 
+  isReturned?: boolean;
+  returnAgainst?: string;
+
   get isSales() {
-    return this.schemaName === 'SalesInvoice';
+    return (
+      this.schemaName === 'SalesInvoice' || this.schemaName == 'SalesQuote'
+    );
+  }
+
+  get isQuote() {
+    return this.schemaName == 'SalesQuote';
   }
 
   get enableDiscounting() {
@@ -118,6 +142,10 @@ export abstract class Invoice extends Transactional {
     return null;
   }
 
+  get isReturn(): boolean {
+    return !!this.returnAgainst;
+  }
+
   constructor(schema: Schema, data: DocValueMap, fyo: Fyo) {
     super(schema, data, fyo);
     this._setGetCurrencies();
@@ -159,12 +187,15 @@ export abstract class Invoice extends Transactional {
       await stockTransfer?.submit();
       await this.load();
     }
+
+    await this._updateIsItemsReturned();
   }
 
   async afterCancel() {
     await super.afterCancel();
     await this._cancelPayments();
     await this._updatePartyOutStanding();
+    await this._updateIsItemsReturned();
   }
 
   async _cancelPayments() {
@@ -230,6 +261,38 @@ export abstract class Invoice extends Transactional {
     return safeParseFloat(exchangeRate.toFixed(2));
   }
 
+  async getTaxItems(): Promise<InvoiceTaxItem[]> {
+    const taxItems: InvoiceTaxItem[] = [];
+    for (const item of this.items ?? []) {
+      if (!item.tax) {
+        continue;
+      }
+
+      const tax = await this.getTax(item.tax);
+      for (const details of (tax.details ?? []) as TaxDetail[]) {
+        let amount = item.amount!;
+        if (
+          this.enableDiscounting &&
+          !this.discountAfterTax &&
+          !item.itemDiscountedTotal?.isZero()
+        ) {
+          amount = item.itemDiscountedTotal!;
+        }
+
+        const taxItem: InvoiceTaxItem = {
+          details,
+          exchangeRate: this.exchangeRate ?? 1,
+          fullAmount: amount,
+          taxAmount: amount.mul(details.rate / 100),
+        };
+
+        taxItems.push(taxItem);
+      }
+    }
+
+    return taxItems;
+  }
+
   async getTaxSummary() {
     const taxes: Record<
       string,
@@ -240,33 +303,16 @@ export abstract class Invoice extends Transactional {
       }
     > = {};
 
-    type TaxDetail = { account: string; rate: number };
+    for (const { details, taxAmount } of await this.getTaxItems()) {
+      const account = details.account;
 
-    for (const item of this.items ?? []) {
-      if (!item.tax) {
-        continue;
-      }
+      taxes[account] ??= {
+        account,
+        rate: details.rate,
+        amount: this.fyo.pesa(0),
+      };
 
-      const tax = await this.getTax(item.tax);
-      for (const { account, rate } of (tax.details ?? []) as TaxDetail[]) {
-        taxes[account] ??= {
-          account,
-          rate,
-          amount: this.fyo.pesa(0),
-        };
-
-        let amount = item.amount!;
-        if (
-          this.enableDiscounting &&
-          !this.discountAfterTax &&
-          !item.itemDiscountedTotal?.isZero()
-        ) {
-          amount = item.itemDiscountedTotal!;
-        }
-
-        const taxAmount = amount.mul(rate / 100);
-        taxes[account].amount = taxes[account].amount.add(taxAmount);
-      }
+      taxes[account].amount = taxes[account].amount.add(taxAmount);
     }
 
     type Summary = typeof taxes[string] & { idx: number };
@@ -366,6 +412,134 @@ export abstract class Invoice extends Transactional {
     }
 
     return discountAmount;
+  }
+
+  async getReturnDoc(): Promise<Invoice | undefined> {
+    if (!this.name) {
+      return;
+    }
+
+    const docData = this.getValidDict(true, true);
+    const docItems = docData.items as DocValueMap[];
+
+    if (!docItems) {
+      return;
+    }
+
+    let returnDocItems: DocValueMap[] = [];
+
+    const returnBalanceItemsQty = await this.fyo.db.getReturnBalanceItemsQty(
+      this.schemaName,
+      this.name
+    );
+
+    for (const item of docItems) {
+      if (!returnBalanceItemsQty) {
+        returnDocItems = docItems;
+        returnDocItems.map((row) => {
+          row.name = undefined;
+          (row.quantity as number) *= -1;
+          return row;
+        });
+        break;
+      }
+
+      const isItemExist = !!returnDocItems.filter(
+        (balanceItem) => balanceItem.item === item.item
+      ).length;
+
+      if (isItemExist) {
+        continue;
+      }
+
+      const returnedItem: ReturnDocItem | undefined =
+        returnBalanceItemsQty[item.item as string];
+
+      let quantity = returnedItem.quantity;
+      let serialNumber: string | undefined =
+        returnedItem.serialNumbers?.join('\n');
+
+      if (
+        item.batch &&
+        returnedItem.batches &&
+        returnedItem.batches[item.batch as string]
+      ) {
+        quantity = returnedItem.batches[item.batch as string].quantity;
+
+        if (returnedItem.batches[item.batch as string].serialNumbers) {
+          serialNumber =
+            returnedItem.batches[item.batch as string].serialNumbers?.join(
+              '\n'
+            );
+        }
+      }
+
+      returnDocItems.push({
+        ...item,
+        serialNumber,
+        name: undefined,
+        quantity: quantity,
+      });
+    }
+    const returnDocData = {
+      ...docData,
+      name: undefined,
+      date: new Date(),
+      items: returnDocItems,
+      returnAgainst: docData.name,
+    } as DocValueMap;
+
+    const newReturnDoc = this.fyo.doc.getNewDoc(
+      this.schema.name,
+      returnDocData
+    ) as Invoice;
+
+    await newReturnDoc.runFormulas();
+    return newReturnDoc;
+  }
+
+  async _updateIsItemsReturned() {
+    if (!this.isReturn || !this.returnAgainst || this.isQuote) {
+      return;
+    }
+
+    const returnInvoices = await this.fyo.db.getAll(this.schema.name, {
+      filters: {
+        submitted: true,
+        cancelled: false,
+        returnAgainst: this.returnAgainst,
+      },
+    });
+
+    const isReturned = !!returnInvoices.length;
+    const invoiceDoc = await this.fyo.doc.getDoc(
+      this.schemaName,
+      this.returnAgainst
+    );
+    await invoiceDoc.setAndSync({ isReturned });
+    await invoiceDoc.submit();
+  }
+
+  async _validateHasLinkedReturnInvoices() {
+    if (!this.name || this.isReturn || this.isQuote) {
+      return;
+    }
+
+    const returnInvoices = await this.fyo.db.getAll(this.schemaName, {
+      filters: {
+        returnAgainst: this.name,
+      },
+    });
+
+    if (!returnInvoices.length) {
+      return;
+    }
+
+    const names = returnInvoices.map(({ name }) => name).join(', ');
+    throw new ValidationError(
+      this.fyo
+        .t`Cannot cancel ${this.name} because of the following ${this.schema.label}: ${names}`
+    );
   }
 
   formulas: FormulaMap = {
@@ -517,7 +691,12 @@ export abstract class Invoice extends Transactional {
     attachment: () =>
       !(this.attachment || !(this.isSubmitted || this.isCancelled)),
     backReference: () => !this.backReference,
-    priceList: () => !this.fyo.singles.AccountingSettings?.enablePriceList,
+    quote: () => !this.quote,
+    priceList: () =>
+      !this.fyo.singles.AccountingSettings?.enablePriceList ||
+      (!this.canEdit && !this.priceList),
+    returnAgainst: () =>
+      (this.isSubmitted || this.isCancelled) && !this.returnAgainst,
   };
 
   static defaults: DefaultMap = {
@@ -595,12 +774,29 @@ export abstract class Invoice extends Transactional {
       return null;
     }
 
-    const accountField = this.isSales ? 'account' : 'paymentAccount';
+    let accountField: AccountFieldEnum = AccountFieldEnum.Account;
+    let paymentType: PaymentTypeEnum = PaymentTypeEnum.Receive;
+
+    if (this.isSales && this.isReturn) {
+      accountField = AccountFieldEnum.PaymentAccount;
+      paymentType = PaymentTypeEnum.Pay;
+    }
+
+    if (!this.isSales) {
+      accountField = AccountFieldEnum.PaymentAccount;
+      paymentType = PaymentTypeEnum.Pay;
+
+      if (this.isReturn) {
+        accountField = AccountFieldEnum.Account;
+        paymentType = PaymentTypeEnum.Receive;
+      }
+    }
+
     const data = {
       party: this.party,
       date: new Date().toISOString().slice(0, 10),
-      paymentType: this.isSales ? 'Receive' : 'Pay',
-      amount: this.outstandingAmount,
+      paymentType,
+      amount: this.outstandingAmount?.abs(),
       [accountField]: this.account,
       for: [
         {
@@ -720,6 +916,7 @@ export abstract class Invoice extends Transactional {
   async beforeCancel(): Promise<void> {
     await super.beforeCancel();
     await this._validateStockTransferCancelled();
+    await this._validateHasLinkedReturnInvoices();
   }
 
   async beforeDelete(): Promise<void> {

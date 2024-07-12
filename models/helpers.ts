@@ -11,9 +11,17 @@ import {
 } from './baseModels/Account/types';
 import { numberSeriesDefaultsMap } from './baseModels/Defaults/Defaults';
 import { Invoice } from './baseModels/Invoice/Invoice';
+import { SalesQuote } from './baseModels/SalesQuote/SalesQuote';
 import { StockMovement } from './inventory/StockMovement';
 import { StockTransfer } from './inventory/StockTransfer';
 import { InvoiceStatus, ModelNameEnum } from './types';
+
+export function getQuoteActions(
+  fyo: Fyo,
+  schemaName: ModelNameEnum.SalesQuote
+): Action[] {
+  return [getMakeInvoiceAction(fyo, schemaName)];
+}
 
 export function getInvoiceActions(
   fyo: Fyo,
@@ -23,6 +31,7 @@ export function getInvoiceActions(
     getMakePaymentAction(fyo),
     getMakeStockTransferAction(fyo, schemaName),
     getLedgerLinkAction(fyo),
+    getMakeReturnDocAction(fyo),
   ];
 }
 
@@ -66,7 +75,10 @@ export function getMakeStockTransferAction(
 
 export function getMakeInvoiceAction(
   fyo: Fyo,
-  schemaName: ModelNameEnum.Shipment | ModelNameEnum.PurchaseReceipt
+  schemaName:
+    | ModelNameEnum.Shipment
+    | ModelNameEnum.PurchaseReceipt
+    | ModelNameEnum.SalesQuote
 ): Action {
   let label = fyo.t`Sales Invoice`;
   if (schemaName === ModelNameEnum.PurchaseReceipt) {
@@ -76,9 +88,15 @@ export function getMakeInvoiceAction(
   return {
     label,
     group: fyo.t`Create`,
-    condition: (doc: Doc) => doc.isSubmitted && !doc.backReference,
+    condition: (doc: Doc) => {
+      if (schemaName === ModelNameEnum.SalesQuote) {
+        return doc.isSubmitted;
+      } else {
+        return doc.isSubmitted && !doc.backReference;
+      }
+    },
     action: async (doc: Doc) => {
-      const invoice = await (doc as StockTransfer).getInvoice();
+      const invoice = await (doc as SalesQuote | StockTransfer).getInvoice();
       if (!invoice || !invoice.name) {
         return;
       }
@@ -97,11 +115,13 @@ export function getMakePaymentAction(fyo: Fyo): Action {
     condition: (doc: Doc) =>
       doc.isSubmitted && !(doc.outstandingAmount as Money).isZero(),
     action: async (doc, router) => {
+      const schemaName = doc.schema.name;
       const payment = (doc as Invoice).getPayment();
       if (!payment) {
         return;
       }
 
+      await payment?.set('referenceType', schemaName);
       const currentRoute = router.currentRoute.value.fullPath;
       payment.once('afterSync', async () => {
         await payment.submit();
@@ -109,7 +129,12 @@ export function getMakePaymentAction(fyo: Fyo): Action {
         await router.push(currentRoute);
       });
 
-      const hideFields = ['party', 'paymentType', 'for'];
+      const hideFields = ['party', 'for'];
+
+      if (!fyo.singles.AccountingSettings?.enableInvoiceReturns) {
+        hideFields.push('paymentType');
+      }
+
       if (doc.schemaName === ModelNameEnum.SalesInvoice) {
         hideFields.push('account');
       } else {
@@ -166,11 +191,17 @@ export function getMakeReturnDocAction(fyo: Fyo): Action {
     label: fyo.t`Return`,
     group: fyo.t`Create`,
     condition: (doc: Doc) =>
-      !!fyo.singles.InventorySettings?.enableStockReturns &&
+      (!!fyo.singles.AccountingSettings?.enableInvoiceReturns ||
+        !!fyo.singles.InventorySettings?.enableStockReturns) &&
       doc.isSubmitted &&
       !doc.isReturn,
     action: async (doc: Doc) => {
-      const returnDoc = await (doc as StockTransfer)?.getReturnDoc();
+      let returnDoc: Invoice | StockTransfer | undefined;
+
+      if (doc instanceof Invoice || doc instanceof StockTransfer) {
+        returnDoc = await doc.getReturnDoc();
+      }
+
       if (!returnDoc || !returnDoc.name) {
         return;
       }
@@ -297,6 +328,14 @@ function getSubmittableDocStatus(doc: RenderData | Doc) {
 }
 
 export function getInvoiceStatus(doc: RenderData | Doc): InvoiceStatus {
+  if (doc.submitted && !doc.cancelled && doc.returnAgainst) {
+    return 'Return';
+  }
+
+  if (doc.submitted && !doc.cancelled && doc.isReturned) {
+    return 'ReturnIssued';
+  }
+
   if (
     doc.submitted &&
     !doc.cancelled &&
