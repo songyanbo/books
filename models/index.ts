@@ -9,10 +9,18 @@ import { JournalEntry } from './baseModels/JournalEntry/JournalEntry';
 import { JournalEntryAccount } from './baseModels/JournalEntryAccount/JournalEntryAccount';
 import { Misc } from './baseModels/Misc';
 import { Party } from './baseModels/Party/Party';
+import { LoyaltyProgram } from './baseModels/LoyaltyProgram/LoyaltyProgram';
+import { LoyaltyPointEntry } from './baseModels/LoyaltyPointEntry/LoyaltyPointEntry';
+import { CollectionRulesItems } from './baseModels/CollectionRulesItems/CollectionRulesItems';
+import { Lead } from './baseModels/Lead/Lead';
+import { AppliedCouponCodes } from './baseModels/AppliedCouponCodes/AppliedCouponCodes';
+import { CouponCode } from './baseModels/CouponCode/CouponCode';
 import { Payment } from './baseModels/Payment/Payment';
 import { PaymentFor } from './baseModels/PaymentFor/PaymentFor';
 import { PriceList } from './baseModels/PriceList/PriceList';
 import { PriceListItem } from './baseModels/PriceList/PriceListItem';
+import { PricingRule } from './baseModels/PricingRule/PricingRule';
+import { PricingRuleItem } from './baseModels/PricingRuleItem/PricingRuleItem';
 import { PrintSettings } from './baseModels/PrintSettings/PrintSettings';
 import { PrintTemplate } from './baseModels/PrintTemplate';
 import { PurchaseInvoice } from './baseModels/PurchaseInvoice/PurchaseInvoice';
@@ -53,16 +61,24 @@ export const models = {
   JournalEntry,
   JournalEntryAccount,
   Misc,
+  Lead,
   Party,
+  LoyaltyProgram,
+  LoyaltyPointEntry,
+  CollectionRulesItems,
+  CouponCode,
   Payment,
   PaymentFor,
   PrintSettings,
   PriceList,
   PriceListItem,
+  PricingRule,
+  PricingRuleItem,
   PurchaseInvoice,
   PurchaseInvoiceItem,
   SalesInvoice,
   SalesInvoiceItem,
+  AppliedCouponCodes,
   SalesQuote,
   SalesQuoteItem,
   SerialNumber,

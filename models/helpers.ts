@@ -1,6 +1,12 @@
 import { Fyo, t } from 'fyo';
 import { Doc } from 'fyo/model/doc';
-import { Action, ColumnConfig, DocStatus, RenderData } from 'fyo/model/types';
+import {
+  Action,
+  ColumnConfig,
+  DocStatus,
+  LeadStatus,
+  RenderData,
+} from 'fyo/model/types';
 import { DateTime } from 'luxon';
 import { Money } from 'pesa';
 import { safeParseFloat } from 'utils/index';
@@ -15,12 +21,27 @@ import { SalesQuote } from './baseModels/SalesQuote/SalesQuote';
 import { StockMovement } from './inventory/StockMovement';
 import { StockTransfer } from './inventory/StockTransfer';
 import { InvoiceStatus, ModelNameEnum } from './types';
+import { Lead } from './baseModels/Lead/Lead';
+import { PricingRule } from './baseModels/PricingRule/PricingRule';
+import { ApplicablePricingRules } from './baseModels/Invoice/types';
+import { LoyaltyProgram } from './baseModels/LoyaltyProgram/LoyaltyProgram';
+import { CollectionRulesItems } from './baseModels/CollectionRulesItems/CollectionRulesItems';
+import { isPesa } from 'fyo/utils';
+import { Party } from './baseModels/Party/Party';
+import { CouponCode } from './baseModels/CouponCode/CouponCode';
+import { SalesInvoice } from './baseModels/SalesInvoice/SalesInvoice';
+import { AppliedCouponCodes } from './baseModels/AppliedCouponCodes/AppliedCouponCodes';
+import { ValidationError } from 'fyo/utils/errors';
 
 export function getQuoteActions(
   fyo: Fyo,
   schemaName: ModelNameEnum.SalesQuote
 ): Action[] {
   return [getMakeInvoiceAction(fyo, schemaName)];
+}
+
+export function getLeadActions(fyo: Fyo): Action[] {
+  return [getCreateCustomerAction(fyo), getSalesQuoteAction(fyo)];
 }
 
 export function getInvoiceActions(
@@ -104,6 +125,37 @@ export function getMakeInvoiceAction(
       const { routeTo } = await import('src/utils/ui');
       const path = `/edit/${invoice.schemaName}/${invoice.name}`;
       await routeTo(path);
+    },
+  };
+}
+
+export function getCreateCustomerAction(fyo: Fyo): Action {
+  return {
+    group: fyo.t`Create`,
+    label: fyo.t`Customer`,
+    condition: (doc: Doc) => !doc.notInserted,
+    action: async (doc: Doc, router) => {
+      const customerData = (doc as Lead).createCustomer();
+
+      if (!customerData.name) {
+        return;
+      }
+      await router.push(`/edit/Party/${customerData.name}`);
+    },
+  };
+}
+
+export function getSalesQuoteAction(fyo: Fyo): Action {
+  return {
+    group: fyo.t`Create`,
+    label: fyo.t`Sales Quote`,
+    condition: (doc: Doc) => !doc.notInserted,
+    action: async (doc, router) => {
+      const salesQuoteData = (doc as Lead).createSalesQuote();
+      if (!salesQuoteData.name) {
+        return;
+      }
+      await router.push(`/edit/SalesQuote/${salesQuoteData.name}`);
     },
   };
 }
@@ -230,18 +282,42 @@ export function getTransactionStatusColumn(): ColumnConfig {
   };
 }
 
+export function getLeadStatusColumn(): ColumnConfig {
+  return {
+    label: t`Status`,
+    fieldname: 'status',
+    fieldtype: 'Select',
+    render(doc) {
+      const status = getLeadStatus(doc) as LeadStatus;
+      const color = statusColor[status] ?? 'gray';
+      const label = getStatusTextOfLead(status);
+
+      return {
+        template: `<Badge class="text-xs" color="${color}">${label}</Badge>`,
+      };
+    },
+  };
+}
+
 export const statusColor: Record<
-  DocStatus | InvoiceStatus,
+  DocStatus | InvoiceStatus | LeadStatus,
   string | undefined
 > = {
   '': 'gray',
   Draft: 'gray',
+  Open: 'gray',
+  Replied: 'yellow',
+  Opportunity: 'yellow',
   Unpaid: 'orange',
   Paid: 'green',
+  Interested: 'yellow',
+  Converted: 'green',
+  Quotation: 'green',
   Saved: 'gray',
   NotSaved: 'gray',
   Submitted: 'green',
   Cancelled: 'red',
+  DonotContact: 'red',
   Return: 'green',
   ReturnIssued: 'green',
 };
@@ -269,6 +345,37 @@ export function getStatusText(status: DocStatus | InvoiceStatus): string {
     default:
       return '';
   }
+}
+
+export function getStatusTextOfLead(status: LeadStatus): string {
+  switch (status) {
+    case 'Open':
+      return t`Open`;
+    case 'Replied':
+      return t`Replied`;
+    case 'Opportunity':
+      return t`Opportunity`;
+    case 'Interested':
+      return t`Interested`;
+    case 'Converted':
+      return t`Converted`;
+    case 'Quotation':
+      return t`Quotation`;
+    case 'DonotContact':
+      return t`Do not Contact`;
+    default:
+      return '';
+  }
+}
+
+export function getLeadStatus(
+  doc?: Lead | Doc | RenderData
+): LeadStatus | DocStatus {
+  if (!doc) {
+    return '';
+  }
+
+  return doc.status as LeadStatus;
 }
 
 export function getDocStatus(
@@ -422,7 +529,7 @@ export function getPriceListStatusColumn(): ColumnConfig {
   };
 }
 
-export function getPriceListEnabledColumn(): ColumnConfig {
+export function getIsDocEnabledColumn(): ColumnConfig {
   return {
     label: t`Enabled`,
     fieldname: 'enabled',
@@ -481,8 +588,6 @@ export async function getExchangeRate({
     };
     exchangeRate = data.rates[toCurrency];
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(error);
     exchangeRate ??= 1;
   }
 
@@ -561,4 +666,579 @@ export async function addItem<M extends ModelsWithItems>(name: string, doc: M) {
   }
 
   await item.set('item', name);
+}
+
+export async function createLoyaltyPointEntry(doc: Invoice) {
+  const loyaltyProgramDoc = (await doc.fyo.doc.getDoc(
+    ModelNameEnum.LoyaltyProgram,
+    doc?.loyaltyProgram
+  )) as LoyaltyProgram;
+
+  if (!loyaltyProgramDoc.isEnabled) {
+    return;
+  }
+  const expiryDate = new Date(Date.now());
+
+  expiryDate.setDate(
+    expiryDate.getDate() + (loyaltyProgramDoc.expiryDuration || 0)
+  );
+
+  let loyaltyProgramTier;
+  let loyaltyPoint: number;
+
+  if (doc.redeemLoyaltyPoints) {
+    loyaltyPoint = -(doc.loyaltyPoints || 0);
+  } else {
+    loyaltyProgramTier = getLoyaltyProgramTier(
+      loyaltyProgramDoc,
+      doc?.grandTotal as Money
+    ) as CollectionRulesItems;
+
+    if (!loyaltyProgramTier) {
+      return;
+    }
+
+    const collectionFactor = loyaltyProgramTier.collectionFactor as number;
+    loyaltyPoint = Math.round(doc?.grandTotal?.float || 0) * collectionFactor;
+  }
+
+  const newLoyaltyPointEntry = doc.fyo.doc.getNewDoc(
+    ModelNameEnum.LoyaltyPointEntry,
+    {
+      loyaltyProgram: doc.loyaltyProgram,
+      customer: doc.party,
+      invoice: doc.name,
+      postingDate: doc.date,
+      purchaseAmount: doc.grandTotal,
+      expiryDate: expiryDate,
+      loyaltyProgramTier: loyaltyProgramTier?.tierName,
+      loyaltyPoints: loyaltyPoint,
+    }
+  );
+
+  return await newLoyaltyPointEntry.sync();
+}
+
+export async function getAddedLPWithGrandTotal(
+  fyo: Fyo,
+  loyaltyProgram: string,
+  loyaltyPoints: number
+) {
+  const loyaltyProgramDoc = (await fyo.doc.getDoc(
+    ModelNameEnum.LoyaltyProgram,
+    loyaltyProgram
+  )) as LoyaltyProgram;
+
+  const conversionFactor = loyaltyProgramDoc.conversionFactor as number;
+
+  return fyo.pesa((loyaltyPoints || 0) * conversionFactor);
+}
+
+export function getLoyaltyProgramTier(
+  loyaltyProgramData: LoyaltyProgram,
+  grandTotal: Money
+): CollectionRulesItems | undefined {
+  if (!loyaltyProgramData.collectionRules) {
+    return;
+  }
+
+  let loyaltyProgramTier: CollectionRulesItems | undefined;
+
+  for (const row of loyaltyProgramData.collectionRules) {
+    if (isPesa(row.minimumTotalSpent)) {
+      const minimumSpent = row.minimumTotalSpent;
+
+      if (!minimumSpent.lte(grandTotal)) {
+        continue;
+      }
+
+      if (
+        !loyaltyProgramTier ||
+        minimumSpent.gt(loyaltyProgramTier.minimumTotalSpent as Money)
+      ) {
+        loyaltyProgramTier = row;
+      }
+    }
+  }
+  return loyaltyProgramTier;
+}
+
+export async function removeLoyaltyPoint(doc: Doc) {
+  if (!doc.loyaltyProgram) {
+    return;
+  }
+
+  const data = (await doc.fyo.db.getAll(ModelNameEnum.LoyaltyPointEntry, {
+    fields: ['name', 'loyaltyPoints', 'expiryDate'],
+    filters: {
+      loyaltyProgram: doc.loyaltyProgram as string,
+      invoice: doc.isReturn
+        ? (doc.returnAgainst as string)
+        : (doc.name as string),
+    },
+  })) as { name: string; loyaltyPoints: number; expiryDate: Date }[];
+
+  if (!data.length) {
+    return;
+  }
+
+  const loyalityPointEntryDoc = await doc.fyo.doc.getDoc(
+    ModelNameEnum.LoyaltyPointEntry,
+    data[0].name
+  );
+
+  const party = (await doc.fyo.doc.getDoc(
+    ModelNameEnum.Party,
+    doc.party as string
+  )) as Party;
+
+  await loyalityPointEntryDoc.delete();
+  await party.updateLoyaltyPoints();
+}
+
+export async function getPricingRulesOfCoupons(
+  doc: SalesInvoice,
+  couponName?: string,
+  pricingRuleDocNames?: string[]
+): Promise<PricingRule[] | undefined> {
+  if (!doc?.coupons?.length && !couponName) {
+    return;
+  }
+
+  let appliedCoupons: CouponCode[] = [];
+
+  const couponsToFetch = couponName
+    ? [couponName]
+    : (doc?.coupons?.map((coupon) => coupon.coupons) as string[] | []);
+
+  if (couponsToFetch?.length) {
+    appliedCoupons = (await doc.fyo.db.getAll(ModelNameEnum.CouponCode, {
+      fields: ['*'],
+      filters: { name: ['in', couponsToFetch] },
+    })) as CouponCode[];
+  }
+
+  const filteredPricingRuleNames = appliedCoupons.filter(
+    (val) => val.pricingRule === pricingRuleDocNames![0]
+  );
+
+  if (!filteredPricingRuleNames.length) {
+    return;
+  }
+
+  const pricingRuleDocsForItem = (await doc.fyo.db.getAll(
+    ModelNameEnum.PricingRule,
+    {
+      fields: ['*'],
+      filters: {
+        name: ['in', pricingRuleDocNames as string[]],
+        isEnabled: true,
+        isCouponCodeBased: true,
+      },
+      orderBy: 'priority',
+      order: 'desc',
+    }
+  )) as PricingRule[];
+
+  return pricingRuleDocsForItem;
+}
+
+export async function getPricingRule(
+  doc: Invoice,
+  couponName?: string
+): Promise<ApplicablePricingRules[] | undefined> {
+  if (
+    !doc.fyo.singles.AccountingSettings?.enablePricingRule ||
+    !doc.isSales ||
+    !doc.items
+  ) {
+    return;
+  }
+
+  const pricingRules: ApplicablePricingRules[] = [];
+
+  for (const item of doc.items) {
+    if (item.isFreeItem) {
+      continue;
+    }
+
+    const pricingRuleDocNames = (
+      await doc.fyo.db.getAll(ModelNameEnum.PricingRuleItem, {
+        fields: ['parent'],
+        filters: {
+          item: item.item as string,
+          unit: item.unit as string,
+        },
+      })
+    ).map((doc) => doc.parent) as string[];
+
+    let pricingRuleDocsForItem;
+
+    const pricingRuleDocs = (await doc.fyo.db.getAll(
+      ModelNameEnum.PricingRule,
+      {
+        fields: ['*'],
+        filters: {
+          name: ['in', pricingRuleDocNames],
+          isEnabled: true,
+          isCouponCodeBased: false,
+        },
+        orderBy: 'priority',
+        order: 'desc',
+      }
+    )) as PricingRule[];
+
+    if (pricingRuleDocs.length) {
+      pricingRuleDocsForItem = pricingRuleDocs;
+    }
+
+    if (!pricingRuleDocs.length || couponName) {
+      const couponPricingRules: PricingRule[] | undefined =
+        await getPricingRulesOfCoupons(
+          doc as SalesInvoice,
+          couponName,
+          pricingRuleDocNames
+        );
+
+      pricingRuleDocsForItem = couponPricingRules as PricingRule[];
+    }
+
+    if (!pricingRuleDocsForItem) {
+      continue;
+    }
+
+    const filtered = filterPricingRules(
+      pricingRuleDocsForItem,
+      doc.date as Date,
+      item.quantity as number,
+      item.amount as Money
+    );
+
+    if (!filtered.length) {
+      continue;
+    }
+
+    const isPricingRuleHasConflicts = getPricingRulesConflicts(filtered);
+
+    if (isPricingRuleHasConflicts) {
+      continue;
+    }
+
+    pricingRules.push({
+      applyOnItem: item.item as string,
+      pricingRule: filtered[0],
+    });
+  }
+
+  return pricingRules;
+}
+
+export function filterPricingRules(
+  pricingRuleDocsForItem: PricingRule[],
+  sinvDate: Date,
+  quantity: number,
+  amount: Money
+): PricingRule[] | [] {
+  const filteredPricingRules: PricingRule[] | undefined = [];
+
+  for (const pricingRuleDoc of pricingRuleDocsForItem) {
+    if (canApplyPricingRule(pricingRuleDoc, sinvDate, quantity, amount)) {
+      filteredPricingRules.push(pricingRuleDoc);
+    }
+  }
+  return filteredPricingRules;
+}
+
+export function canApplyPricingRule(
+  pricingRuleDoc: PricingRule,
+  sinvDate: Date,
+  quantity: number,
+  amount: Money
+): boolean {
+  // Filter by Quantity
+  if (
+    (pricingRuleDoc.minQuantity as number) > 0 &&
+    quantity < (pricingRuleDoc.minQuantity as number)
+  ) {
+    return false;
+  }
+
+  if (
+    (pricingRuleDoc.maxQuantity as number) > 0 &&
+    quantity > (pricingRuleDoc.maxQuantity as number)
+  ) {
+    return false;
+  }
+
+  // Filter by Amount
+  if (
+    !pricingRuleDoc.minAmount?.isZero() &&
+    amount.lte(pricingRuleDoc.minAmount as Money)
+  ) {
+    return false;
+  }
+
+  if (
+    !pricingRuleDoc.maxAmount?.isZero() &&
+    amount.gte(pricingRuleDoc.maxAmount as Money)
+  ) {
+    return false;
+  }
+
+  // Filter by Validity
+  if (
+    pricingRuleDoc.validFrom &&
+    new Date(sinvDate.setHours(0, 0, 0, 0)).toISOString() <
+      pricingRuleDoc.validFrom.toISOString()
+  ) {
+    return false;
+  }
+
+  if (
+    pricingRuleDoc.validTo &&
+    new Date(sinvDate.setHours(0, 0, 0, 0)).toISOString() >
+      pricingRuleDoc.validTo.toISOString()
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function canApplyCouponCode(
+  couponCodeData: CouponCode,
+  amount: Money,
+  sinvDate: Date
+): boolean {
+  // Filter by Amount
+  if (
+    !couponCodeData.minAmount?.isZero() &&
+    amount.lte(couponCodeData.minAmount as Money)
+  ) {
+    return false;
+  }
+
+  if (
+    !couponCodeData.maxAmount?.isZero() &&
+    amount.gte(couponCodeData.maxAmount as Money)
+  ) {
+    return false;
+  }
+
+  // Filter by Validity
+  if (
+    couponCodeData.validFrom &&
+    new Date(sinvDate.setHours(0, 0, 0, 0)).toISOString() <
+      couponCodeData.validFrom.toISOString()
+  ) {
+    return false;
+  }
+
+  if (
+    couponCodeData.validTo &&
+    new Date(sinvDate.setHours(0, 0, 0, 0)).toISOString() >
+      couponCodeData.validTo.toISOString()
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export async function getApplicableCouponCodesName(
+  couponName: string,
+  sinvDoc: SalesInvoice
+) {
+  const couponCodeDatas = (await sinvDoc.fyo.db.getAll(
+    ModelNameEnum.CouponCode,
+    {
+      fields: ['*'],
+      filters: {
+        name: couponName,
+        isEnabled: true,
+      },
+    }
+  )) as CouponCode[];
+
+  if (!couponCodeDatas || !couponCodeDatas.length) {
+    return [];
+  }
+
+  const applicablePricingRules = await getPricingRule(sinvDoc, couponName);
+
+  if (!applicablePricingRules?.length) {
+    return [];
+  }
+
+  return applicablePricingRules
+    ?.filter(
+      (rule) => rule?.pricingRule?.name === couponCodeDatas[0].pricingRule
+    )
+    .map((rule) => ({
+      pricingRule: rule.pricingRule.name,
+      coupon: couponCodeDatas[0].name,
+    }));
+}
+
+export async function validateCouponCode(
+  doc: AppliedCouponCodes,
+  value: string,
+  sinvDoc?: SalesInvoice
+) {
+  const coupon = await doc.fyo.db.getAll(ModelNameEnum.CouponCode, {
+    fields: [
+      'minAmount',
+      'maxAmount',
+      'pricingRule',
+      'validFrom',
+      'validTo',
+      'maximumUse',
+      'used',
+      'isEnabled',
+    ],
+    filters: { name: value },
+  });
+
+  if (!coupon[0]?.isEnabled) {
+    throw new ValidationError(
+      'Coupon code cannot be applied as it is not enabled'
+    );
+  }
+
+  if ((coupon[0]?.maximumUse as number) <= (coupon[0]?.used as number)) {
+    throw new ValidationError(
+      'Coupon code has been used maximum number of times'
+    );
+  }
+
+  if (!doc.parentdoc) {
+    doc.parentdoc = sinvDoc;
+  }
+
+  const applicableCouponCodesNames = await getApplicableCouponCodesName(
+    value,
+    doc.parentdoc as SalesInvoice
+  );
+
+  if (!applicableCouponCodesNames?.length) {
+    throw new ValidationError(
+      t`Coupon ${value} is not applicable for applied items.`
+    );
+  }
+
+  const couponExist = doc.parentdoc?.coupons?.some(
+    (coupon) => coupon?.coupons === value
+  );
+
+  if (couponExist) {
+    throw new ValidationError(t`${value} already applied.`);
+  }
+
+  if (
+    (coupon[0].minAmount as Money).gte(doc.parentdoc?.grandTotal as Money) &&
+    !(coupon[0].minAmount as Money).isZero()
+  ) {
+    throw new ValidationError(
+      t`The Grand Total must exceed ${
+        (coupon[0].minAmount as Money).float
+      } to apply the coupon ${value}.`
+    );
+  }
+
+  if (
+    (coupon[0].maxAmount as Money).lte(doc.parentdoc?.grandTotal as Money) &&
+    !(coupon[0].maxAmount as Money).isZero()
+  ) {
+    throw new ValidationError(
+      t`The Grand Total must be less than ${
+        (coupon[0].maxAmount as Money).float
+      } to apply this coupon.`
+    );
+  }
+
+  if ((coupon[0].validFrom as Date) > (doc.parentdoc?.date as Date)) {
+    throw new ValidationError(
+      t`Valid From Date should be less than Valid To Date.`
+    );
+  }
+
+  if ((coupon[0].validTo as Date) < (doc.parentdoc?.date as Date)) {
+    throw new ValidationError(
+      t`Valid To Date should be greater than Valid From Date.`
+    );
+  }
+}
+
+export function removeFreeItems(sinvDoc: SalesInvoice) {
+  if (!sinvDoc || !sinvDoc.items) {
+    return;
+  }
+
+  if (!!sinvDoc.isPricingRuleApplied) {
+    return;
+  }
+
+  for (const item of sinvDoc.items) {
+    if (item.isFreeItem) {
+      sinvDoc.items = sinvDoc.items?.filter(
+        (invoiceItem) => invoiceItem.name !== item.name
+      );
+    }
+  }
+}
+
+export async function updatePricingRule(sinvDoc: SalesInvoice) {
+  const applicablePricingRuleNames = await getPricingRule(sinvDoc);
+
+  if (!applicablePricingRuleNames || !applicablePricingRuleNames.length) {
+    sinvDoc.pricingRuleDetail = undefined;
+    sinvDoc.isPricingRuleApplied = false;
+    removeFreeItems(sinvDoc);
+    return;
+  }
+
+  const appliedPricingRuleCount = sinvDoc?.items?.filter(
+    (val) => val.isFreeItem
+  ).length;
+
+  setTimeout(() => {
+    (async () => {
+      if (appliedPricingRuleCount !== applicablePricingRuleNames?.length) {
+        await sinvDoc.appendPricingRuleDetail(applicablePricingRuleNames);
+        await sinvDoc.applyProductDiscount();
+      }
+    })();
+  }, 1);
+}
+
+export function getPricingRulesConflicts(
+  pricingRules: PricingRule[]
+): undefined | boolean {
+  const pricingRuleDocs = Array.from(pricingRules);
+
+  const firstPricingRule = pricingRuleDocs.shift();
+  if (!firstPricingRule) {
+    return;
+  }
+
+  const conflictingPricingRuleNames: string[] = [];
+  for (const pricingRuleDoc of pricingRuleDocs.slice(0)) {
+    if (pricingRuleDoc.priority !== firstPricingRule?.priority) {
+      continue;
+    }
+
+    conflictingPricingRuleNames.push(pricingRuleDoc.name as string);
+  }
+
+  if (!conflictingPricingRuleNames.length) {
+    return;
+  }
+
+  return true;
+}
+
+export function roundFreeItemQty(
+  quantity: number,
+  roundingMethod: 'round' | 'floor' | 'ceil'
+): number {
+  return Math[roundingMethod](quantity);
 }

@@ -15,10 +15,19 @@ import JournalEntryAccount from './app/JournalEntryAccount.json';
 import Misc from './app/Misc.json';
 import NumberSeries from './app/NumberSeries.json';
 import Party from './app/Party.json';
+import Lead from './app/Lead.json';
+import LoyaltyProgram from './app/LoyaltyProgram.json';
+import LoyaltyPointEntry from './app/LoyaltyPointEntry.json';
+import CollectionRulesItems from './app/CollectionRulesItems.json';
+import CouponCode from './app/CouponCode.json';
+import AppliedCouponCodes from './app/AppliedCouponCodes.json';
 import Payment from './app/Payment.json';
 import PaymentFor from './app/PaymentFor.json';
 import PriceList from './app/PriceList.json';
 import PriceListItem from './app/PriceListItem.json';
+import PricingRule from './app/PricingRule.json';
+import PricingRuleItem from './app/PricingRuleItem.json';
+import PricingRuleDetail from './app/PricingRuleDetail.json';
 import PrintSettings from './app/PrintSettings.json';
 import PrintTemplate from './app/PrintTemplate.json';
 import PurchaseInvoice from './app/PurchaseInvoice.json';
@@ -96,10 +105,15 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   AccountingLedgerEntry as Schema,
 
   Party as Schema,
+  Lead as Schema,
   Address as Schema,
   Item as Schema,
   UOM as Schema,
   UOMConversionItem as Schema,
+
+  LoyaltyProgram as Schema,
+  LoyaltyPointEntry as Schema,
+  CollectionRulesItems as Schema,
 
   Payment as Schema,
   PaymentFor as Schema,
@@ -116,9 +130,15 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   SalesInvoiceItem as SchemaStub,
   PurchaseInvoiceItem as SchemaStub,
   SalesQuoteItem as SchemaStub,
+  CouponCode as Schema,
+  AppliedCouponCodes as Schema,
 
   PriceList as Schema,
   PriceListItem as SchemaStub,
+
+  PricingRule as Schema,
+  PricingRuleItem as SchemaStub,
+  PricingRuleDetail as SchemaStub,
 
   Tax as Schema,
   TaxDetail as Schema,

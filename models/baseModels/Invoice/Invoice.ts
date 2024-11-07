@@ -11,7 +11,20 @@ import {
 import { DEFAULT_CURRENCY } from 'fyo/utils/consts';
 import { ValidationError } from 'fyo/utils/errors';
 import { Transactional } from 'models/Transactional/Transactional';
-import { addItem, getExchangeRate, getNumberSeries } from 'models/helpers';
+import {
+  addItem,
+  canApplyCouponCode,
+  canApplyPricingRule,
+  createLoyaltyPointEntry,
+  filterPricingRules,
+  getAddedLPWithGrandTotal,
+  getApplicableCouponCodesName,
+  getExchangeRate,
+  getNumberSeries,
+  getPricingRulesConflicts,
+  removeLoyaltyPoint,
+  roundFreeItemQty,
+} from 'models/helpers';
 import { StockTransfer } from 'models/inventory/StockTransfer';
 import { validateBatch } from 'models/inventory/helpers';
 import { ModelNameEnum } from 'models/types';
@@ -27,6 +40,15 @@ import { Tax } from '../Tax/Tax';
 import { TaxSummary } from '../TaxSummary/TaxSummary';
 import { ReturnDocItem } from 'models/inventory/types';
 import { AccountFieldEnum, PaymentTypeEnum } from '../Payment/types';
+import { PricingRule } from '../PricingRule/PricingRule';
+import { ApplicableCouponCodes, ApplicablePricingRules } from './types';
+import { PricingRuleDetail } from '../PricingRuleDetail/PricingRuleDetail';
+import { LoyaltyProgram } from '../LoyaltyProgram/LoyaltyProgram';
+import { AppliedCouponCodes } from '../AppliedCouponCodes/AppliedCouponCodes';
+import { CouponCode } from '../CouponCode/CouponCode';
+import { SalesInvoice } from '../SalesInvoice/SalesInvoice';
+import { SalesInvoiceItem } from '../SalesInvoiceItem/SalesInvoiceItem';
+import { PriceListItem } from '../PriceList/PriceListItem';
 
 export type TaxDetail = {
   account: string;
@@ -46,6 +68,7 @@ export abstract class Invoice extends Transactional {
   taxes?: TaxSummary[];
 
   items?: InvoiceItem[];
+  coupons?: AppliedCouponCodes[];
   party?: string;
   account?: string;
   currency?: string;
@@ -58,8 +81,10 @@ export abstract class Invoice extends Transactional {
   setDiscountAmount?: boolean;
   discountAmount?: Money;
   discountPercent?: number;
+  loyaltyPoints?: number;
   discountAfterTax?: boolean;
   stockNotTransferred?: number;
+  loyaltyProgram?: string;
   backReference?: string;
 
   submitted?: boolean;
@@ -69,6 +94,8 @@ export abstract class Invoice extends Transactional {
 
   isReturned?: boolean;
   returnAgainst?: string;
+
+  pricingRuleDetail?: PricingRuleDetail[];
 
   get isSales() {
     return (
@@ -160,18 +187,40 @@ export abstract class Invoice extends Transactional {
       throw new ValidationError(this.fyo.t`Discount Account is not set.`);
     }
     await validateBatch(this);
+    await this._validatePricingRule();
   }
 
   async afterSubmit() {
     await super.afterSubmit();
 
+    if (this.isReturn) {
+      await this._removeLoyaltyPointEntry();
+      this.reduceUsedCountOfCoupons();
+
+      return;
+    }
+
+    if (this.isQuote) {
+      return;
+    }
+
+    let lpAddedBaseGrandTotal: Money | undefined;
+
+    if (this.redeemLoyaltyPoints) {
+      lpAddedBaseGrandTotal = await this.getLPAddedBaseGrandTotal();
+    }
+
     // update outstanding amounts
     await this.fyo.db.update(this.schemaName, {
       name: this.name as string,
-      outstandingAmount: this.baseGrandTotal!,
+      outstandingAmount: lpAddedBaseGrandTotal! || this.baseGrandTotal!,
     });
 
-    const party = (await this.fyo.doc.getDoc('Party', this.party)) as Party;
+    const party = (await this.fyo.doc.getDoc(
+      ModelNameEnum.Party,
+      this.party
+    )) as Party;
+
     await party.updateOutstandingAmount();
 
     if (this.makeAutoPayment && this.autoPaymentAccount) {
@@ -189,6 +238,11 @@ export abstract class Invoice extends Transactional {
     }
 
     await this._updateIsItemsReturned();
+    await this._createLoyaltyPointEntry();
+
+    if (this.schemaName === ModelNameEnum.SalesInvoice) {
+      this.updateUsedCountOfCoupons();
+    }
   }
 
   async afterCancel() {
@@ -196,6 +250,12 @@ export abstract class Invoice extends Transactional {
     await this._cancelPayments();
     await this._updatePartyOutStanding();
     await this._updateIsItemsReturned();
+    await this._removeLoyaltyPointEntry();
+    this.reduceUsedCountOfCoupons();
+  }
+
+  async _removeLoyaltyPointEntry() {
+    await removeLoyaltyPoint(this);
   }
 
   async _cancelPayments() {
@@ -498,6 +558,31 @@ export abstract class Invoice extends Transactional {
     return newReturnDoc;
   }
 
+  updateUsedCountOfCoupons() {
+    this.coupons?.map(async (coupon) => {
+      const couponDoc = await this.fyo.doc.getDoc(
+        ModelNameEnum.CouponCode,
+        coupon.coupons
+      );
+
+      await couponDoc.setAndSync({ used: (couponDoc.used as number) + 1 });
+    });
+  }
+  reduceUsedCountOfCoupons() {
+    if (!this.coupons?.length) {
+      return;
+    }
+
+    this.coupons?.map(async (coupon) => {
+      const couponDoc = await this.fyo.doc.getDoc(
+        ModelNameEnum.CouponCode,
+        coupon.coupons
+      );
+
+      await couponDoc.setAndSync({ used: (couponDoc.used as number) - 1 });
+    });
+  }
+
   async _updateIsItemsReturned() {
     if (!this.isReturn || !this.returnAgainst || this.isQuote) {
       return;
@@ -518,6 +603,28 @@ export abstract class Invoice extends Transactional {
     );
     await invoiceDoc.setAndSync({ isReturned });
     await invoiceDoc.submit();
+  }
+
+  async _createLoyaltyPointEntry() {
+    if (!this.loyaltyProgram) {
+      return;
+    }
+
+    const loyaltyProgramDoc = (await this.fyo.doc.getDoc(
+      ModelNameEnum.LoyaltyProgram,
+      this.loyaltyProgram
+    )) as LoyaltyProgram;
+
+    const expiryDate = this.date as Date;
+    const fromDate = loyaltyProgramDoc.fromDate as Date;
+    const toDate = loyaltyProgramDoc.toDate as Date;
+
+    if (fromDate <= expiryDate && toDate >= expiryDate) {
+      const party = (await this.loadAndGetLink('party')) as Party;
+
+      await createLoyaltyPointEntry(this);
+      await party.updateLoyaltyPoints();
+    }
   }
 
   async _validateHasLinkedReturnInvoices() {
@@ -542,6 +649,16 @@ export abstract class Invoice extends Transactional {
     );
   }
 
+  async getLPAddedBaseGrandTotal() {
+    const totalLotaltyAmount = await getAddedLPWithGrandTotal(
+      this.fyo,
+      this.loyaltyProgram as string,
+      this.loyaltyPoints as number
+    );
+
+    return totalLotaltyAmount.sub(this.baseGrandTotal as Money).abs();
+  }
+
   formulas: FormulaMap = {
     account: {
       formula: async () => {
@@ -552,6 +669,16 @@ export abstract class Invoice extends Transactional {
         )) as string;
       },
       dependsOn: ['party'],
+    },
+    loyaltyProgram: {
+      formula: async () => {
+        const partyDoc = await this.fyo.doc.getDoc(
+          ModelNameEnum.Party,
+          this.party
+        );
+        return partyDoc?.loyaltyProgram as string;
+      },
+      dependsOn: ['party', 'name'],
     },
     currency: {
       formula: async () => {
@@ -593,12 +720,15 @@ export abstract class Invoice extends Transactional {
       dependsOn: ['grandTotal', 'exchangeRate'],
     },
     outstandingAmount: {
-      formula: () => {
+      formula: async () => {
         if (this.submitted) {
           return;
         }
+        if (this.redeemLoyaltyPoints) {
+          return await this.getLPAddedBaseGrandTotal();
+        }
 
-        return this.baseGrandTotal!;
+        return this.baseGrandTotal;
       },
     },
     stockNotTransferred: {
@@ -620,6 +750,22 @@ export abstract class Invoice extends Transactional {
         !!this.fyo.singles.AccountingSettings?.enableInventory &&
         !!this.autoStockTransferLocation,
       dependsOn: [],
+    },
+    isPricingRuleApplied: {
+      formula: async () => {
+        if (!this.fyo.singles.AccountingSettings?.enablePricingRule) {
+          return false;
+        }
+
+        const pricingRule = await this.getPricingRule();
+        if (!pricingRule) {
+          return false;
+        }
+
+        await this.appendPricingRuleDetail(pricingRule);
+        return !!pricingRule;
+      },
+      dependsOn: ['items', 'coupons'],
     },
   };
 
@@ -692,11 +838,17 @@ export abstract class Invoice extends Transactional {
       !(this.attachment || !(this.isSubmitted || this.isCancelled)),
     backReference: () => !this.backReference,
     quote: () => !this.quote,
+    loyaltyProgram: () => !this.loyaltyProgram,
+    loyaltyPoints: () => !this.redeemLoyaltyPoints || this.isReturn,
+    redeemLoyaltyPoints: () => !this.loyaltyProgram || this.isReturn,
     priceList: () =>
       !this.fyo.singles.AccountingSettings?.enablePriceList ||
       (!this.canEdit && !this.priceList),
     returnAgainst: () =>
       (this.isSubmitted || this.isCancelled) && !this.returnAgainst,
+    pricingRuleDetail: () =>
+      !this.fyo.singles.AccountingSettings?.enablePricingRule ||
+      !this.pricingRuleDetail?.length,
   };
 
   static defaults: DefaultMap = {
@@ -913,6 +1065,41 @@ export abstract class Invoice extends Transactional {
     return transfer;
   }
 
+  async beforeSync(): Promise<void> {
+    await super.beforeSync();
+
+    if (this.pricingRuleDetail?.length) {
+      await this.applyProductDiscount();
+    } else {
+      this.clearFreeItems();
+    }
+
+    if (!this.coupons?.length) {
+      return;
+    }
+
+    const applicableCouponCodes = await Promise.all(
+      this.coupons?.map(async (coupon) => {
+        return await getApplicableCouponCodesName(
+          coupon.coupons as string,
+          this as SalesInvoice
+        );
+      })
+    );
+
+    const flattedApplicableCouponCodes = applicableCouponCodes?.flat();
+
+    const couponCodeDoc = (await this.fyo.doc.getDoc(
+      ModelNameEnum.CouponCode,
+      this.coupons[0].coupons
+    )) as CouponCode;
+
+    couponCodeDoc.removeUnusedCoupons(
+      flattedApplicableCouponCodes as ApplicableCouponCodes[],
+      this as SalesInvoice
+    );
+  }
+
   async beforeCancel(): Promise<void> {
     await super.beforeCancel();
     await this._validateStockTransferCancelled();
@@ -1040,5 +1227,272 @@ export abstract class Invoice extends Transactional {
 
   async addItem(name: string) {
     return await addItem(name, this);
+  }
+
+  async appendPricingRuleDetail(
+    applicablePricingRule: ApplicablePricingRules[]
+  ) {
+    await this.set('pricingRuleDetail', null);
+
+    for (const doc of applicablePricingRule) {
+      await this.append('pricingRuleDetail', {
+        referenceName: doc.pricingRule.name,
+        referenceItem: doc.applyOnItem,
+      });
+    }
+  }
+
+  clearFreeItems() {
+    if (this.pricingRuleDetail?.length || !this.items) {
+      return;
+    }
+
+    for (const item of this.items) {
+      if (item.isFreeItem) {
+        this.items = this.items?.filter(
+          (invoiceItem) => invoiceItem.name !== item.name
+        );
+      }
+    }
+  }
+
+  async applyProductDiscount() {
+    if (!this.items) {
+      return;
+    }
+
+    this.items = this.items.filter((item) => !item.isFreeItem);
+
+    for (const item of this.items) {
+      const pricingRuleDetailForItem = this.pricingRuleDetail?.filter(
+        (doc) => doc.referenceItem === item.item
+      );
+
+      if (!pricingRuleDetailForItem?.length) {
+        continue;
+      }
+
+      const pricingRuleDoc = (await this.fyo.doc.getDoc(
+        ModelNameEnum.PricingRule,
+        pricingRuleDetailForItem[0].referenceName
+      )) as PricingRule;
+
+      if (pricingRuleDoc.discountType === 'Price Discount') {
+        continue;
+      }
+
+      const appliedItems = pricingRuleDoc.appliedItems?.map((doc) => doc.item);
+      if (!appliedItems?.includes(item.item)) {
+        continue;
+      }
+
+      const canApplyPRLOnItem = canApplyPricingRule(
+        pricingRuleDoc,
+        this.date as Date,
+        item.quantity as number,
+        item.amount as Money
+      );
+
+      if (!canApplyPRLOnItem) {
+        continue;
+      }
+
+      let freeItemQty = pricingRuleDoc.freeItemQuantity as number;
+
+      if (pricingRuleDoc.isRecursive) {
+        freeItemQty =
+          (item.quantity as number) / (pricingRuleDoc.recurseEvery as number);
+      }
+
+      if (pricingRuleDoc.roundFreeItemQty) {
+        freeItemQty = roundFreeItemQty(
+          freeItemQty,
+          pricingRuleDoc.roundingMethod as 'round' | 'floor' | 'ceil'
+        );
+      }
+
+      await this.append('items', {
+        item: pricingRuleDoc.freeItem as string,
+        quantity: freeItemQty,
+        isFreeItem: true,
+        pricingRule: pricingRuleDoc.title,
+        rate: pricingRuleDoc.freeItemRate,
+        unit: pricingRuleDoc.freeItemUnit,
+      });
+    }
+  }
+
+  async getPricingRuleDocNames(
+    item: SalesInvoiceItem,
+    sinvDoc: SalesInvoice
+  ): Promise<string[]> {
+    const docs = (await sinvDoc.fyo.db.getAll(ModelNameEnum.PricingRuleItem, {
+      fields: ['parent'],
+      filters: {
+        item: item.item as string,
+        unit: item.unit as string,
+      },
+    })) as PriceListItem[];
+
+    return docs.map((doc) => doc.parent) as string[];
+  }
+
+  async getPricingRule(): Promise<ApplicablePricingRules[] | undefined> {
+    if (!this.isSales || !this.items) {
+      return;
+    }
+
+    const pricingRules: ApplicablePricingRules[] = [];
+
+    for (const item of this.items) {
+      if (item.isFreeItem) {
+        continue;
+      }
+
+      const duplicatePricingRule = this.pricingRuleDetail?.filter(
+        (pricingrule: PricingRuleDetail) =>
+          pricingrule.referenceItem == item.item
+      );
+
+      if (duplicatePricingRule && duplicatePricingRule?.length >= 2) {
+        continue;
+      }
+
+      const pricingRuleDocNames = await this.getPricingRuleDocNames(
+        item,
+        this as SalesInvoice
+      );
+
+      if (!pricingRuleDocNames.length) {
+        continue;
+      }
+
+      if (this.coupons?.length) {
+        for (const coupon of this.coupons) {
+          const couponCodeDatas = await this.fyo.db.getAll(
+            ModelNameEnum.CouponCode,
+            {
+              fields: ['*'],
+              filters: {
+                name: coupon?.coupons as string,
+                isEnabled: true,
+              },
+            }
+          );
+
+          const couponPricingRuleDocNames = couponCodeDatas
+            .map((doc) => doc.pricingRule)
+            .filter((val) =>
+              pricingRuleDocNames.includes(val as string)
+            ) as string[];
+
+          if (!couponPricingRuleDocNames.length) {
+            continue;
+          }
+
+          const filtered = canApplyCouponCode(
+            couponCodeDatas[0] as CouponCode,
+            this.grandTotal as Money,
+            this.date as Date
+          );
+
+          if (filtered) {
+            pricingRuleDocNames.push(...couponPricingRuleDocNames);
+          }
+        }
+      }
+
+      const pricingRuleDocsForItem = (await this.fyo.db.getAll(
+        ModelNameEnum.PricingRule,
+        {
+          fields: ['*'],
+          filters: {
+            name: ['in', pricingRuleDocNames],
+            isEnabled: true,
+          },
+          orderBy: 'priority',
+          order: 'desc',
+        }
+      )) as PricingRule[];
+
+      if (pricingRuleDocsForItem[0].isCouponCodeBased) {
+        if (!this.coupons?.length) {
+          continue;
+        }
+
+        const data = await Promise.allSettled(
+          this.coupons?.map(async (val) => {
+            if (!val.coupons) {
+              return false;
+            }
+
+            const [pricingRule] = (
+              await this.fyo.db.getAll(ModelNameEnum.CouponCode, {
+                fields: ['pricingRule'],
+                filters: {
+                  name: val?.coupons,
+                },
+              })
+            ).map((doc) => doc.pricingRule);
+
+            if (!pricingRule) {
+              return false;
+            }
+
+            if (pricingRuleDocsForItem[0].name === pricingRule) {
+              return pricingRule;
+            }
+
+            return false;
+          })
+        );
+
+        const fulfilledData = data
+          .filter(
+            (result): result is PromiseFulfilledResult<string | false> =>
+              result.status === 'fulfilled'
+          )
+          .map((result) => result.value as string);
+
+        if (!fulfilledData[0] && !fulfilledData.filter((val) => val).length) {
+          continue;
+        }
+      }
+
+      const filtered = filterPricingRules(
+        pricingRuleDocsForItem,
+        this.date as Date,
+        item.quantity as number,
+        item.amount as Money
+      );
+
+      if (!filtered.length) {
+        continue;
+      }
+
+      const isPricingRuleHasConflicts = getPricingRulesConflicts(filtered);
+
+      if (isPricingRuleHasConflicts) {
+        continue;
+      }
+
+      pricingRules.push({
+        applyOnItem: item.item as string,
+        pricingRule: filtered[0],
+      });
+    }
+
+    return pricingRules;
+  }
+
+  async _validatePricingRule() {
+    if (!this.fyo.singles.AccountingSettings?.enablePricingRule) {
+      return;
+    }
+
+    if (!this.items) {
+      return;
+    }
+    await this.getPricingRule();
   }
 }

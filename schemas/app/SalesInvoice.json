@@ -25,6 +25,13 @@
       "section": "Default"
     },
     {
+      "fieldname": "coupons",
+      "label": "Coupons",
+      "fieldtype": "Table",
+      "target": "AppliedCouponCodes",
+      "section": "Coupons"
+    },
+    {
       "fieldname": "backReference",
       "label": "Back Reference",
       "fieldtype": "Link",
@@ -71,10 +78,46 @@
       "section": "References"
     },
     {
+      "fieldname": "loyaltyProgram",
+      "fieldtype": "Link",
+      "target": "LoyaltyProgram",
+      "label": "Loyalty Program",
+      "section": "References",
+      "readOnly": true
+    },
+    {
+      "fieldname": "redeemLoyaltyPoints",
+      "fieldtype": "Check",
+      "default": false,
+      "label": "Redeem Loyalty Points",
+      "section": "Loyalty Points Redemption"
+    },
+    {
+      "fieldname": "loyaltyPoints",
+      "fieldtype": "Int",
+      "label": "Loyalty Points",
+      "section": "Loyalty Points Redemption"
+    },
+    {
       "fieldname": "isPOS",
       "fieldtype": "Check",
       "default": false,
       "hidden": true
+    },
+    {
+      "fieldname": "isPricingRuleApplied",
+      "fieldtype": "Check",
+      "default": false,
+      "hidden": true
+    },
+    {
+      "fieldname": "pricingRuleDetail",
+      "fieldtype": "Table",
+      "label": "Pricing Rule Detail",
+      "target": "PricingRuleDetail",
+      "edit": false,
+      "readOnly": true,
+      "section": "References"
     }
   ],
   "keywordFields": ["name", "party"]

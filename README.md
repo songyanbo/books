@@ -1,8 +1,3 @@
-> [!IMPORTANT]
->
-> Frappe Books is looking for a maintainer, please view [#775](https://github.com/frappe/books/issues/775) for more info.
-
-
 <div align="center" markdown="1">
 
 <img src="https://user-images.githubusercontent.com/29507195/207267672-d422db6c-d89a-4bbe-9822-468a55c15053.png" alt="Frappe Books logo" width="384"/>
@@ -15,7 +10,7 @@
 
 Free Desktop book-keeping software for small businesses and freelancers.
 
-[frappebooks.com](https://frappebooks.com/)
+[frappe.io/books](https://frappe.io/books/)
 
 <img src="https://user-images.githubusercontent.com/29507195/207267857-4ae48890-3fb2-4046-80cf-3256b46c72a0.png" alt="Frappe Books Preview"/>
 
@@ -39,6 +34,7 @@ Free Desktop book-keeping software for small businesses and freelancers.
 ## Features
 
 1. Double-entry accounting
+1. Point of Sale
 1. Invoicing
 1. Billing
 1. Payments
@@ -53,9 +49,22 @@ Free Desktop book-keeping software for small businesses and freelancers.
 
 ## Installation
 
+### Via Flatpak (Linux)
+
+<a href='https://flathub.org/apps/io.frappe.books'>
+    <img width='120' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
+</a>
+
+### Using Homebrew (for MacOS and Linux)
+
+```zsh
+brew install --cask frappe-books
+```
+
+### Manual
+
 Download and install the latest release for your platform from the [releases
-page](https://github.com/frappe/books/releases) or the [download
-page](https://frappebooks.com/download).
+page](https://github.com/frappe/books/releases) .
 
 ## Development
 
@@ -151,16 +160,18 @@ If you want to contribute code then you can fork this repo, make changes and rai
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | French             | [DeepL](https://www.deepl.com/), [mael-chouteau](https://github.com/mael-chouteau), [joandreux](https://github.com/joandreux)                                    |
 | German             | [DeepL](https://www.deepl.com/), [barredterra](https://github.com/barredterra), [promexio](https://github.com/promexio), [C2H6-383](https://github.com/C2H6-383) |
-| Portuguese         | [DeepL](https://www.deepl.com/)                                                                                                                                  |
+| Portuguese         | [DeepL](https://www.deepl.com/), [Valdir Amaral](https://github.com/valdir-amaral)                                                                               |
 | Arabic             | [taha2002](https://github.com/taha2002), [Faridget](https://github.com/faridget)                                                                                 |
 | Catalan            | Dídac E. Jiménez                                                                                                                                                 |
-| Dutch              | [FastAct](https://github.com/FastAct)                                                                                                                            |
+| Dutch              | [RijckAlex](https://github.com/RijckAlex)                                                                                                                        |
 | Spanish            | [talmax1124](https://github.com/talmax1124), [delbertf](https://github.com/delbertf)                                                                             |
 | Gujarati           | [dhruvilxcode](https://github.com/dhruvilxcode), [4silvertooth](https://github.com/4silvertooth)                                                                 |
+| Hindi              | [bnsinghgit](https://github.com/bnsinghgit)                                                                                                                      |
 | Korean             | [Isaac-Kwon](https://github.com/Isaac-Kwon)                                                                                                                      |
-| Simplified Chinese | [wcxu21](https://github.com/wcxu21), [wolone](https://github.com/wolone)                                                                                         |
-| Swedish            | [papplo](https://github.com/papplo)                                                                                                                              |
+| Simplified Chinese | [wcxu21](https://github.com/wcxu21), [wolone](https://github.com/wolone), [Ji Qu](https://github.com/winkidney)                                                  |
+| Swedish            | [papplo](https://github.com/papplo), [Crims-on](https://github.com/Crims-on)                                                                                     |
 | Turkish            | Eyuq, [XTechnology-TR](https://github.com/XTechnology-TR)                                                                                                        |
+| Danish             | [Tummas Joensen](https://github.com/slang123)                                                                                                                    |
 
 ## License
 

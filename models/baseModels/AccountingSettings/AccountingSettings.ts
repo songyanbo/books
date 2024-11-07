@@ -15,8 +15,12 @@ export class AccountingSettings extends Doc {
   enableDiscounting?: boolean;
   enableInventory?: boolean;
   enablePriceList?: boolean;
+  enableLead?: boolean;
+  enableCouponCode?: boolean;
   enableFormCustomization?: boolean;
   enableInvoiceReturns?: boolean;
+  enableLoyaltyProgram?: boolean;
+  enablePricingRule?: boolean;
 
   static filters: FiltersMap = {
     writeOffAccount: () => ({
@@ -48,14 +52,24 @@ export class AccountingSettings extends Doc {
     enableInventory: () => {
       return !!this.enableInventory;
     },
+    enableLead: () => {
+      return !!this.enableLead;
+    },
     enableInvoiceReturns: () => {
       return !!this.enableInvoiceReturns;
+    },
+    enableLoyaltyProgram: () => {
+      return !!this.enableLoyaltyProgram;
     },
   };
 
   override hidden: HiddenMap = {
     discountAccount: () => !this.enableDiscounting,
     gstin: () => this.fyo.singles.SystemSettings?.countryCode !== 'in',
+    enablePricingRule: () =>
+      !this.fyo.singles.AccountingSettings?.enableDiscounting,
+    enableCouponCode: () =>
+      !this.fyo.singles.AccountingSettings?.enablePricingRule,
   };
 
   async change(ch: ChangeArg) {
